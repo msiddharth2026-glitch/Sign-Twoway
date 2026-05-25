@@ -37,6 +37,12 @@ main{flex:1;padding:20px 24px;display:flex;flex-direction:column;gap:16px;overfl
 .status-pill.detecting{background:#1e3a5f;color:#38bdf8}
 .hand-dot{width:10px;height:10px;border-radius:50%;background:#334155;transition:.3s}
 .hand-dot.on{background:#22c55e;box-shadow:0 0 8px #22c55e}
+/* Top-3 */
+.top3{display:flex;gap:8px;margin-top:4px}
+.top3-item{display:flex;flex-direction:column;align-items:center;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:6px 12px;min-width:52px;transition:.2s}
+.top3-item.first{border-color:#38bdf8}
+.top3-letter{font-size:22px;font-weight:800;color:#38bdf8}
+.top3-conf{font-size:10px;color:#64748b}
 
 /* Camera */
 .cam-wrap{position:relative;border-radius:8px;overflow:hidden;background:#000;aspect-ratio:4/3}
@@ -129,6 +135,7 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
         <div class="conf-bar"><div class="conf-fill" id="conf-fill" style="width:0%"></div></div>
       </div>
       <div class="status-pill" id="pred-status">Waiting</div>
+      <div class="top3" id="top3-row" style="display:none"></div>
     </div>
 
     <!-- Camera -->
@@ -259,9 +266,23 @@ function handlePrediction(d){
   fill.style.background = conf>=80?"#22c55e":conf>=60?"#f59e0b":"#f87171";
 
   const pill = document.getElementById("pred-status");
-  if(d.stable){ pill.className="status-pill ready"; pill.textContent="Stable"; }
+  if(d.stable){ pill.className="status-pill ready"; pill.textContent="Stable ✓"; }
   else if(d.hand){ pill.className="status-pill detecting"; pill.textContent="Detecting..."; }
   else{ pill.className="status-pill"; pill.textContent="Waiting"; }
+
+  // Top-3 predictions
+  const t3row = document.getElementById("top3-row");
+  if(d.top3 && d.top3.length && d.hand){
+    t3row.style.display = "flex";
+    t3row.innerHTML = d.top3.map((item,i)=>
+      `<div class="top3-item${i===0?' first':''}">
+        <div class="top3-letter">${item[0]}</div>
+        <div class="top3-conf">${item[1]}%</div>
+      </div>`
+    ).join("");
+  } else {
+    t3row.style.display = "none";
+  }
 
   if(d.new_letter){
     letterEl.classList.remove("new");
@@ -326,7 +347,13 @@ function appendLetter(l){
 }
 function addSpace(){ sentence.push(" "); renderSentence(); setStatus("Space added"); }
 function deleteLast(){ if(sentence.length){ sentence.pop(); renderSentence(); } }
-function clearSentence(){ sentence=[]; renderSentence(); setStatus("Cleared"); }
+function clearSentence(){
+  sentence=[];
+  renderSentence();
+  setStatus("Cleared");
+  // Reset server-side detection state so same letter can be re-detected
+  fetch("/reset_state",{method:"POST"}).catch(()=>{});
+}
 
 function renderSentence(){
   const box = document.getElementById("sentence-box");
