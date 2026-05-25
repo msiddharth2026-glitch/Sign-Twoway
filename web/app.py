@@ -20,7 +20,7 @@ TMP_DIR    = os.path.join(BASE, "static", "tmp")
 LM_MODEL   = os.path.join(ROOT, "landmark_model.keras")
 ENCODER    = os.path.join(BASE, "label_encoder.pkl")
 SCALER     = os.path.join(BASE, "scaler.pkl")
-RF_MODEL   = os.path.join(BASE, "rf_model.pkl")
+RF_MODEL   = os.path.join(BASE, "rf_model.pkl")   # optional — not required
 os.makedirs(TMP_DIR, exist_ok=True)
 
 sys.path.insert(0, ROOT)

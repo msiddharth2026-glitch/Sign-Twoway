@@ -1,3 +1,8 @@
+# Large files — excluded from git
 X.pickle
 y.pickle
 web/rf_model.pkl
+
+# Python cache
+__pycache__/
+*.pyc
