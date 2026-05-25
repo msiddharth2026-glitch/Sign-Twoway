@@ -1,12 +1,11 @@
 """
-Sign Language Translator — Real-Time WebSocket Edition
+Sign Language Translator — Vercel-compatible (HTTP polling edition)
 """
 import os, json, base64, pickle, sys, time
 import numpy as np
 import cv2
 import tensorflow as tf
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
-from flask_socketio import SocketIO, emit
 from werkzeug.security import generate_password_hash, check_password_hash
 from gtts import gTTS
 from string import ascii_lowercase
@@ -17,7 +16,7 @@ from collections import deque, Counter
 BASE       = os.path.dirname(os.path.abspath(__file__))
 ROOT       = os.path.dirname(BASE)
 AUDIO_DIR  = os.path.join(ROOT, "audio")
-USERS_FILE = os.path.join(ROOT, "users.json")
+USERS_FILE = os.path.join(BASE, "users.json")
 TMP_DIR    = os.path.join(BASE, "static", "tmp")
 LM_MODEL   = os.path.join(ROOT, "landmark_model.keras")
 ENCODER    = os.path.join(BASE, "label_encoder.pkl")
@@ -26,16 +25,14 @@ RF_MODEL   = os.path.join(BASE, "rf_model.pkl")
 os.makedirs(TMP_DIR, exist_ok=True)
 
 sys.path.insert(0, ROOT)
-from feature_extractor import extract_features
 
-# ── MediaPipe task-based Hands (0.10+) ────────────────────────────────────────
+# ── MediaPipe ─────────────────────────────────────────────────────────────────
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 import urllib.request
 
 LANDMARKER = os.path.join(BASE, "hand_landmarker.task")
 if not os.path.exists(LANDMARKER):
-    print("Downloading hand landmarker model...")
     urllib.request.urlretrieve(
         "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
         LANDMARKER)
@@ -48,108 +45,157 @@ _hand_opts = mp_vision.HandLandmarkerOptions(
     min_hand_presence_confidence=0.4,
     min_tracking_confidence=0.4)
 hand_detector = mp_vision.HandLandmarker.create_from_options(_hand_opts)
-print("MediaPipe HandLandmarker ready")
 
 def detect_hands(frame):
-    """Detect hands and return landmark list or None."""
     rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb))
     res    = hand_detector.detect(mp_img)
-    if res.hand_landmarks:
-        return res.hand_landmarks[0]   # list of NormalizedLandmark
-    return None
-
+    return res.hand_landmarks[0] if res.hand_landmarks else None
 
 LETTERS = {ch: str(i) for i, ch in enumerate(ascii_lowercase, start=1)}
 
-# ── Load ensemble models ───────────────────────────────────────────────────────
-USE_ENSEMBLE = all(os.path.exists(p) for p in [LM_MODEL, ENCODER, SCALER, RF_MODEL])
+# ── Load models ────────────────────────────────────────────────────────────────
+try:
+    from feature_extractor import extract_features
+    USE_ENSEMBLE = all(os.path.exists(p) for p in [LM_MODEL, ENCODER, SCALER, RF_MODEL])
+except ImportError:
+    USE_ENSEMBLE = False
+
 if USE_ENSEMBLE:
-    print("Loading ensemble (MLP + RF)...")
-    mlp_model     = tf.keras.models.load_model(LM_MODEL)
-    with open(ENCODER,"rb") as f: label_encoder = pickle.load(f)
-    with open(SCALER, "rb") as f: scaler        = pickle.load(f)
-    with open(RF_MODEL,"rb") as f: rf_model     = pickle.load(f)
+    mlp_model = tf.keras.models.load_model(LM_MODEL)
+    with open(ENCODER, "rb") as f: label_encoder = pickle.load(f)
+    with open(SCALER,  "rb") as f: scaler        = pickle.load(f)
+    with open(RF_MODEL,"rb") as f: rf_model      = pickle.load(f)
     CATEGORIES = list(label_encoder.classes_)
-    print(f"Ensemble ready — {len(CATEGORIES)} classes")
 else:
-    print("WARNING: Run train_landmarks.py first")
     mlp_model = label_encoder = scaler = rf_model = None
     CATEGORIES = []
 
-# ── Per-client state ───────────────────────────────────────────────────────────
+def predict_landmarks(lm):
+    if not USE_ENSEMBLE: return "?", 0.0
+    vec    = extract_features(lm).reshape(1, -1)
+    vec_sc = scaler.transform(vec)
+    mlp_p  = mlp_model.predict(vec_sc, verbose=0)[0]
+    rf_p   = rf_model.predict_proba(vec_sc)[0]
+    ens    = 0.6 * mlp_p + 0.4 * rf_p
+    idx    = int(np.argmax(ens))
+    return label_encoder.inverse_transform([idx])[0], float(ens[idx])
+
+# ── Per-session state (in-memory, works for single-instance deploys) ───────────
 class ClientState:
     def __init__(self):
         self.buf           = deque(maxlen=5)
         self.last_locked   = None
-        self.lock_time     = 0
-        self.frame_count   = 0
+        self.lock_time     = 0.0
         self.no_hand_count = 0
-        self.capturing     = False   # start/stop capture toggle
 
-client_states = {}
+_states: dict[str, ClientState] = {}
 
-def get_state(sid):
-    if sid not in client_states:
-        client_states[sid] = ClientState()
-    return client_states[sid]
+def get_state(uid: str) -> ClientState:
+    if uid not in _states:
+        _states[uid] = ClientState()
+    return _states[uid]
 
-# ── Fast prediction ────────────────────────────────────────────────────────────
-def predict_landmarks(lm):
-    if not USE_ENSEMBLE: return "?", 0.0
-    vec    = extract_features(lm).reshape(1,-1)
-    vec_sc = scaler.transform(vec)
-    mlp_p  = mlp_model.predict(vec_sc, verbose=0)[0]
-    rf_p   = rf_model.predict_proba(vec_sc)[0]
-    ens    = 0.6*mlp_p + 0.4*rf_p
-    idx    = int(np.argmax(ens))
-    return label_encoder.inverse_transform([idx])[0], float(ens[idx])
-def validate_hand(lm, frame_shape):
-    """
-    Balanced hand quality check — not too strict, not too loose.
-    Returns (valid, reason).
-    """
-    h, w = frame_shape[:2]
+# ── Helpers ────────────────────────────────────────────────────────────────────
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE) as f: return json.load(f)
+    return {}
 
-    # 1. Bounding box must be a reasonable size
-    xs = [l.x for l in lm]; ys = [l.y for l in lm]
-    bw = (max(xs) - min(xs)) * w
-    bh = (max(ys) - min(ys)) * h
-    if bw < 25 or bh < 25:
-        return False, "Hand too small"
+def save_users(u):
+    with open(USERS_FILE, "w") as f: json.dump(u, f, indent=2)
 
-    # 2. At least 15 of 21 landmarks must have reasonable presence
-    low_presence = sum(1 for l in lm if l.presence < 0.3)
-    if low_presence > 6:
-        return False, "Poor landmark quality"
+def find_sign_image(idx):
+    for ext in ("png", "jpeg", "jpg"):
+        p = os.path.join(AUDIO_DIR, f"{idx}.{ext}")
+        if os.path.exists(p): return p
+    return None
 
-    return True, "OK"
+def find_space_image():
+    for ext in ("png", "jpeg", "jpg"):
+        p = os.path.join(AUDIO_DIR, f"space.{ext}")
+        if os.path.exists(p): return p
+    return None
 
+def img_to_b64(path):
+    if not path or not os.path.exists(path): return None
+    with open(path, "rb") as f:
+        ext  = path.rsplit(".", 1)[-1]
+        mime = "jpeg" if ext in ("jpg", "jpeg") else "png"
+        return f"data:image/{mime};base64," + base64.b64encode(f.read()).decode()
 
-def process_frame(sid, img_data):
-    """Core real-time pipeline using legacy MediaPipe Hands API."""
-    state = get_state(sid)
-    state.frame_count += 1
+# ── Flask ──────────────────────────────────────────────────────────────────────
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24))
 
-    # Process every 2nd frame for speed
-    if state.frame_count % 2 != 0:
-        return None
+# ── Auth ───────────────────────────────────────────────────────────────────────
+@app.route("/")
+def index():
+    if "user" in session: return redirect(url_for("dashboard"))
+    return render_template("login.html")
 
-    if not state.capturing:
-        return {"capturing": False, "hand": False, "letter": "—",
-                "conf": 0, "status": "Capture stopped", "stable": False}
+@app.route("/register", methods=["POST"])
+def register():
+    d = request.json
+    u, p, colour = d.get("username","").strip(), d.get("password",""), d.get("colour","").strip().lower()
+    if not u or not p or not colour: return jsonify(ok=False, msg="Fill in all fields.")
+    if len(p) < 4: return jsonify(ok=False, msg="Password min 4 characters.")
+    users = load_users()
+    if u in users: return jsonify(ok=False, msg="Username already exists.")
+    users[u] = {"password": generate_password_hash(p), "colour": colour}
+    save_users(users)
+    return jsonify(ok=True, msg="Account created!")
 
-    # Decode frame
+@app.route("/login", methods=["POST"])
+def login():
+    d = request.json
+    u, p = d.get("username","").strip(), d.get("password","")
+    users = load_users()
+    if u not in users: return jsonify(ok=False, msg="User not found.")
+    ud = users[u]
+    pw = ud["password"] if isinstance(ud, dict) else ud
+    if not check_password_hash(pw, p): return jsonify(ok=False, msg="Incorrect password.")
+    session["pending_user"] = u
+    return jsonify(ok=True)
+
+@app.route("/verify_colour", methods=["POST"])
+def verify_colour():
+    u = session.get("pending_user")
+    if not u: return jsonify(ok=False, msg="Session expired."), 401
+    colour = request.json.get("colour","").strip().lower()
+    users  = load_users(); ud = users.get(u, {})
+    stored = ud.get("colour","") if isinstance(ud, dict) else ""
+    if not stored or colour == stored:
+        session["user"] = u; session.pop("pending_user", None)
+        return jsonify(ok=True)
+    return jsonify(ok=False, msg="Wrong colour — try again")
+
+@app.route("/logout")
+def logout():
+    session.clear(); return redirect(url_for("index"))
+
+@app.route("/dashboard")
+def dashboard():
+    if "user" not in session: return redirect(url_for("index"))
+    return render_template("dashboard.html", username=session["user"])
+
+# ── Predict (HTTP polling, replaces WebSocket) ─────────────────────────────────
+@app.route("/predict", methods=["POST"])
+def predict():
+    if "user" not in session: return jsonify(ok=False), 401
+    uid   = session["user"]
+    state = get_state(uid)
+
+    img_data = request.json.get("image","")
     try:
         _, encoded = img_data.split(",", 1)
         arr   = np.frombuffer(base64.b64decode(encoded), np.uint8)
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if frame is None: return None
+        if frame is None: raise ValueError("bad frame")
     except Exception:
-        return None
+        return jsonify(hand=False, letter="—", conf=0, stable=False, status="Bad frame")
 
-    # BGR → RGB, detect hand
-    frame = cv2.convertScaleAbs(frame, alpha=1.0, beta=-20)
+    frame  = cv2.convertScaleAbs(frame, alpha=1.0, beta=-20)
     lm_raw = detect_hands(frame)
 
     if lm_raw is None:
@@ -157,37 +203,25 @@ def process_frame(sid, img_data):
         if state.no_hand_count > 10:
             state.last_locked = None
             state.buf.clear()
-        return {"capturing": True, "hand": False, "letter": "—", "conf": 0,
-                "status": "No Hand Detected", "stable": False}
+        return jsonify(hand=False, letter="—", conf=0, stable=False, status="No Hand Detected")
 
     state.no_hand_count = 0
-    lm_raw = lm_raw   # already the landmark list
-
-    # Reject if bounding box too small — likely a false detection
     xs = [l.x for l in lm_raw]; ys = [l.y for l in lm_raw]
     h, w = frame.shape[:2]
-    bw = (max(xs) - min(xs)) * w
-    bh = (max(ys) - min(ys)) * h
-    if bw < 30 or bh < 30:
-        return {"capturing": True, "hand": False, "letter": "—", "conf": 0,
-                "status": "No Hand Detected", "stable": False}
+    if (max(xs)-min(xs))*w < 30 or (max(ys)-min(ys))*h < 30:
+        return jsonify(hand=False, letter="—", conf=0, stable=False, status="No Hand Detected")
 
-    # Predict
     label, conf = predict_landmarks(lm_raw)
-    if "unknown" in str(label).lower():
-        label = "?"
+    if "unknown" in str(label).lower(): label = "?"
 
     CONF_THRESHOLD = 0.72
     if conf < CONF_THRESHOLD:
-        return {"capturing": True, "hand": True, "letter": "—",
-                "conf": round(conf*100), "status": "Detecting...", "stable": False}
+        return jsonify(hand=True, letter="—", conf=round(conf*100), stable=False, status="Detecting...")
 
-    # Buffer with fast-switch on gesture change
     if state.buf and label != "?":
         counts  = Counter(l for l,_ in state.buf)
         cur_top = counts.most_common(1)[0][0]
-        if label != cur_top:
-            state.buf.clear()
+        if label != cur_top: state.buf.clear()
 
     state.buf.append((label, conf))
     counts   = Counter(l for l,_ in state.buf)
@@ -204,129 +238,27 @@ def process_frame(sid, img_data):
             state.lock_time   = now
             state.buf.clear()
 
-    return {
-        "capturing":  True,
-        "hand":       True,
-        "letter":     top.upper() if stable else "—",
-        "conf":       round(avg_conf * 100),
-        "stable":     stable,
-        "new_letter": new_letter,
-        "status":     "Stable ✓" if stable else "Detecting..."
-    }
+    return jsonify(
+        hand=True,
+        letter=top.upper() if stable else "—",
+        conf=round(avg_conf * 100),
+        stable=stable,
+        new_letter=new_letter,
+        status="Stable ✓" if stable else "Detecting..."
+    )
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def load_users():
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE) as f: return json.load(f)
-    return {}
-
-def save_users(u):
-    with open(USERS_FILE,"w") as f: json.dump(u, f, indent=2)
-
-def find_sign_image(idx):
-    for ext in ("png","jpeg","jpg"):
-        p = os.path.join(AUDIO_DIR, f"{idx}.{ext}")
-        if os.path.exists(p): return p
-    return None
-
-def find_space_image():
-    for ext in ("png","jpeg","jpg"):
-        p = os.path.join(AUDIO_DIR, f"space.{ext}")
-        if os.path.exists(p): return p
-    return None
-
-def img_to_b64(path):
-    if not path or not os.path.exists(path): return None
-    with open(path,"rb") as f:
-        ext  = path.rsplit(".",1)[-1]
-        mime = "jpeg" if ext in ("jpg","jpeg") else "png"
-        return f"data:image/{mime};base64," + base64.b64encode(f.read()).decode()
-
-# ── Flask + SocketIO ───────────────────────────────────────────────────────────
-app = Flask(__name__)
-app.secret_key = os.urandom(24)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
-
-# ── Auth routes ────────────────────────────────────────────────────────────────
-@app.route("/")
-def index():
-    if "user" in session: return redirect(url_for("dashboard"))
-    return render_template("login.html")
-
-@app.route("/register", methods=["POST"])
-def register():
-    d = request.json
-    u,p,colour = d.get("username","").strip(), d.get("password",""), d.get("colour","").strip().lower()
-    if not u or not p or not colour: return jsonify(ok=False, msg="Fill in all fields.")
-    if len(p)<4: return jsonify(ok=False, msg="Password min 4 characters.")
-    users = load_users()
-    if u in users: return jsonify(ok=False, msg="Username already exists.")
-    users[u] = {"password": generate_password_hash(p), "colour": colour}
-    save_users(users); return jsonify(ok=True, msg="Account created!")
-
-@app.route("/login", methods=["POST"])
-def login():
-    d = request.json
-    u,p = d.get("username","").strip(), d.get("password","")
-    users = load_users()
-    if u not in users: return jsonify(ok=False, msg="User not found.")
-    ud = users[u]
-    pw = ud["password"] if isinstance(ud,dict) else ud
-    if not check_password_hash(pw,p): return jsonify(ok=False, msg="Incorrect password.")
-    session["pending_user"] = u
-    return jsonify(ok=True)
-
-@app.route("/verify_colour", methods=["POST"])
-def verify_colour():
-    u = session.get("pending_user")
-    if not u: return jsonify(ok=False, msg="Session expired."), 401
-    colour = request.json.get("colour","").strip().lower()
-    users  = load_users(); ud = users.get(u,{})
-    stored = ud.get("colour","") if isinstance(ud,dict) else ""
-    if not stored or colour == stored:
-        session["user"]=u; session.pop("pending_user",None); return jsonify(ok=True)
-    return jsonify(ok=False, msg="Wrong colour — try again")
-
-@app.route("/logout")
-def logout():
-    session.clear(); return redirect(url_for("index"))
-
-@app.route("/dashboard")
-def dashboard():
-    if "user" not in session: return redirect(url_for("index"))
-    return render_template("dashboard.html", username=session["user"])
-
-# ── WebSocket events ───────────────────────────────────────────────────────────
-@socketio.on("frame")
-def on_frame(data):
-    if "user" not in session: return
-    result = process_frame(request.sid, data["image"])
-    if result: emit("prediction", result)
-
-@socketio.on("set_capture")
-def on_set_capture(data):
-    state = get_state(request.sid)
-    state.capturing = data.get("active", False)
-    state.buf.clear()
-    state.last_locked = None
-
-@socketio.on("disconnect")
-def on_disconnect():
-    client_states.pop(request.sid, None)
-
-# ── REST: speak + signs ────────────────────────────────────────────────────────
+# ── Speak ──────────────────────────────────────────────────────────────────────
 @app.route("/speak", methods=["POST"])
 def speak():
     if "user" not in session: return jsonify(ok=False), 401
     text = request.json.get("text","").strip()
     if not text: return jsonify(ok=False, msg="No text")
-    # Lowercase so gTTS reads as a word/sentence, not letter by letter
-    spoken = text.lower()
     fname = f"speech_{session['user']}.mp3"
     path  = os.path.join(TMP_DIR, fname)
-    gTTS(text=spoken, lang="en").save(path)
+    gTTS(text=text.lower(), lang="en").save(path)
     return jsonify(ok=True, url=f"/static/tmp/{fname}")
 
+# ── Signs ──────────────────────────────────────────────────────────────────────
 @app.route("/signs", methods=["POST"])
 def signs():
     if "user" not in session: return jsonify(ok=False), 401
@@ -334,11 +266,12 @@ def signs():
     if not text: return jsonify(ok=False, msg="No text")
     result = []
     for ch in text:
-        if ch==" ": result.append({"char":"SPC","img":img_to_b64(find_space_image())})
+        if ch == " ":
+            result.append({"char":"SPC","img":img_to_b64(find_space_image())})
         elif ch in LETTERS:
-            idx=int(LETTERS[ch])-1
+            idx = int(LETTERS[ch]) - 1
             result.append({"char":ch.upper(),"img":img_to_b64(find_sign_image(idx))})
     return jsonify(ok=True, signs=result)
 
 if __name__ == "__main__":
-    socketio.run(app, debug=False, port=5000, host="0.0.0.0")
+    app.run(debug=False, port=5000, host="0.0.0.0")

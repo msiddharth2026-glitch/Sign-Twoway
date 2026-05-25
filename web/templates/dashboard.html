@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Sign Language Translator</title>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0f172a;font-family:'Segoe UI',sans-serif;color:#f8fafc;min-height:100vh;display:flex;flex-direction:column}
@@ -217,7 +217,6 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
 let capturing = false;
 function toggleCapture(){
   capturing = !capturing;
-  socket.emit("set_capture", {active: capturing});
   const btn  = document.getElementById("capture-btn");
   const hint = document.getElementById("capture-hint");
   if(capturing){
@@ -225,14 +224,13 @@ function toggleCapture(){
     btn.style.color       = "#fff";
     btn.textContent       = "⏹ Stop Capture";
     hint.textContent      = "Detecting signs — show your hand";
-    startStreaming();
+    startPolling();
   } else {
     btn.style.background  = "#22c55e";
     btn.style.color       = "#0f172a";
     btn.textContent       = "▶ Start Capture";
     hint.textContent      = "Click Start to begin detecting signs";
-    stopStreaming();
-    // Reset prediction display
+    stopPolling();
     document.getElementById("pred-letter").textContent = "—";
     document.getElementById("conf-label").textContent  = "Confidence: 0%";
     document.getElementById("conf-fill").style.width   = "0%";
@@ -243,13 +241,7 @@ function toggleCapture(){
   }
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────────
-const socket = io();
-let streaming = false;
-let frameInterval = null;
-
-socket.on("prediction", d => {
-  // Hand indicator
+function handlePrediction(d){
   const dot = document.getElementById("hand-dot");
   const hs  = document.getElementById("hand-status");
   dot.className = "hand-dot" + (d.hand ? " on" : "");
@@ -257,24 +249,20 @@ socket.on("prediction", d => {
   document.getElementById("cam-hint").textContent =
     d.hand ? "Hold gesture steady" : "Show your hand to the camera";
 
-  // Letter display
   const letterEl = document.getElementById("pred-letter");
   letterEl.textContent = d.letter || "—";
 
-  // Confidence
   const conf = d.conf || 0;
   document.getElementById("conf-label").textContent = `Confidence: ${conf}%`;
   const fill = document.getElementById("conf-fill");
   fill.style.width = conf + "%";
   fill.style.background = conf>=80?"#22c55e":conf>=60?"#f59e0b":"#f87171";
 
-  // Status pill
   const pill = document.getElementById("pred-status");
   if(d.stable){ pill.className="status-pill ready"; pill.textContent="Stable"; }
   else if(d.hand){ pill.className="status-pill detecting"; pill.textContent="Detecting..."; }
   else{ pill.className="status-pill"; pill.textContent="Waiting"; }
 
-  // Auto-append new letter
   if(d.new_letter){
     letterEl.classList.remove("new");
     void letterEl.offsetWidth;
@@ -282,10 +270,12 @@ socket.on("prediction", d => {
     appendLetter(d.new_letter);
     setStatus(`Added: ${d.new_letter}`);
   }
-});
+}
 
-// ── Camera + streaming ────────────────────────────────────────────────────────
+// ── Camera + HTTP polling ─────────────────────────────────────────────────────
 let stream = null;
+let pollInterval = null;
+let polling = false;
 
 async function startCamera(){
   if(stream) return;
@@ -296,23 +286,35 @@ async function startCamera(){
   }catch(e){ setStatus("Camera error: "+e.message,"err"); }
 }
 
-function startStreaming(){
-  if(frameInterval) clearInterval(frameInterval);
-  const video   = document.getElementById("video");
-  const canvas  = document.createElement("canvas");
-  canvas.width  = 320; canvas.height = 240;
-  const ctx     = canvas.getContext("2d");
+function startPolling(){
+  if(pollInterval) clearInterval(pollInterval);
+  const video  = document.getElementById("video");
+  const canvas = document.createElement("canvas");
+  canvas.width = 320; canvas.height = 240;
+  const ctx    = canvas.getContext("2d");
+  polling = false;
 
-  frameInterval = setInterval(()=>{
-    if(!capturing || !stream) return;   // stop sending if not capturing
+  pollInterval = setInterval(async ()=>{
+    if(!capturing || !stream || polling) return;
+    polling = true;
     ctx.drawImage(video, 0, 0, 320, 240);
     const img = canvas.toDataURL("image/jpeg", 0.6);
-    socket.emit("frame", {image: img});
-  }, 120);   // ~8fps — reduces lag significantly
+    try{
+      const r = await fetch("/predict",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({image: img})
+      });
+      const d = await r.json();
+      handlePrediction(d);
+    }catch(e){ /* ignore transient errors */ }
+    finally{ polling = false; }
+  }, 150); // ~6-7fps
 }
 
-function stopStreaming(){
-  if(frameInterval){ clearInterval(frameInterval); frameInterval=null; }
+function stopPolling(){
+  if(pollInterval){ clearInterval(pollInterval); pollInterval=null; }
+  polling = false;
 }
 
 // ── Sentence builder ──────────────────────────────────────────────────────────
@@ -352,7 +354,7 @@ function switchMode(n){
   document.querySelectorAll(".tab")[n-1].classList.add("active");
   if(n===1) startCamera();
   else {
-    stopStreaming();
+    stopPolling();
     capturing = false;
   }
 }
