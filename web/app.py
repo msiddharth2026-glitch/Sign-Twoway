@@ -69,7 +69,7 @@ def predict_landmarks(lm):
     else:
         probs = mlp_p
     idx = int(np.argmax(probs))
-    return label_encoder.inverse_transform([idx])[0], float(probs[idx])
+    return str(label_encoder.inverse_transform([idx])[0]), float(probs[idx])
 
 def top3_predictions(lm):
     if not USE_MLP: return []
@@ -82,7 +82,7 @@ def top3_predictions(lm):
     else:
         probs = mlp_p
     top_idx = np.argsort(probs)[::-1][:3]
-    return [(label_encoder.inverse_transform([i])[0].upper(), round(float(probs[i])*100))
+    return [(str(label_encoder.inverse_transform([i])[0]).upper(), round(float(probs[i])*100))
             for i in top_idx]
 
 # ── Per-session state ──────────────────────────────────────────────────────────
