@@ -317,8 +317,8 @@ async function initMediaPipe(){
   mpHands.setOptions({
     maxNumHands: 2,
     modelComplexity: 1,
-    minDetectionConfidence: 0.8,
-    minTrackingConfidence: 0.7
+    minDetectionConfidence: 0.9,
+    minTrackingConfidence: 0.8
   });
   mpHands.onResults(onHandResults);
   setStatus("MediaPipe ready — click Start Capture");
@@ -340,26 +340,38 @@ function onHandResults(results){
   ctx.drawImage(video, 0, 0, W, H);
 
   if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
-    lastLandmarks = results.multiHandLandmarks; // store ALL hands
-
-    // Draw bounding box around each hand
-    results.multiHandLandmarks.forEach(lm => {
-      const xs = lm.map(l => l.x * W);
-      const ys = lm.map(l => l.y * H);
-      const pad = 20;
-      const x1 = Math.max(0, Math.min(...xs) - pad);
-      const y1 = Math.max(0, Math.min(...ys) - pad);
-      const x2 = Math.min(W, Math.max(...xs) + pad);
-      const y2 = Math.min(H, Math.max(...ys) + pad);
-      ctx.strokeStyle = "#38bdf8";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+    // Filter out false detections (too small or too large)
+    const validHands = results.multiHandLandmarks.filter(lm => {
+      const xs = lm.map(l => l.x);
+      const ys = lm.map(l => l.y);
+      const bw = Math.max(...xs) - Math.min(...xs);
+      const bh = Math.max(...ys) - Math.min(...ys);
+      return bw > 0.05 && bh > 0.05 && bw < 0.85 && bh < 0.85;
     });
 
-    document.getElementById("hand-dot").className = "hand-dot on";
-    const count = results.multiHandLandmarks.length;
-    document.getElementById("hand-status").textContent = count === 2 ? "Both hands detected" : "Hand detected";
-    document.getElementById("cam-hint").textContent = "Hold gesture steady";
+    if(validHands.length > 0){
+      lastLandmarks = validHands;
+      validHands.forEach(lm => {
+        const xs = lm.map(l => l.x * W);
+        const ys = lm.map(l => l.y * H);
+        const pad = 20;
+        const x1 = Math.max(0, Math.min(...xs) - pad);
+        const y1 = Math.max(0, Math.min(...ys) - pad);
+        const x2 = Math.min(W, Math.max(...xs) + pad);
+        const y2 = Math.min(H, Math.max(...ys) + pad);
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+      });
+      document.getElementById("hand-dot").className = "hand-dot on";
+      document.getElementById("hand-status").textContent = validHands.length === 2 ? "Both hands detected" : "Hand detected";
+      document.getElementById("cam-hint").textContent = "Hold gesture steady";
+    } else {
+      lastLandmarks = null;
+      document.getElementById("hand-dot").className = "hand-dot";
+      document.getElementById("hand-status").textContent = "No hand";
+      document.getElementById("cam-hint").textContent = "Show your hand to the camera";
+    }
   } else {
     lastLandmarks = null;
     document.getElementById("hand-dot").className = "hand-dot";
@@ -392,8 +404,22 @@ function startPolling(){
 }
 
 async function sendLandmarks(lmList){
-  // lmList is array of hands, each hand has 21 landmarks
-  const hands = lmList.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
+  // Validate each hand — reject if too small (face/body false detection)
+  const validHands = lmList.filter(lm => {
+    const xs = lm.map(l => l.x);
+    const ys = lm.map(l => l.y);
+    const bw = Math.max(...xs) - Math.min(...xs);
+    const bh = Math.max(...ys) - Math.min(...ys);
+    // Real hand: bbox between 5% and 80% of frame
+    return bw > 0.05 && bh > 0.05 && bw < 0.85 && bh < 0.85;
+  });
+
+  if(validHands.length === 0){
+    handlePrediction({hand:false, letter:"—", conf:0, stable:false, status:"No Hand Detected", top3:[]});
+    return;
+  }
+
+  const hands = validHands.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
   try{
     const r = await fetch("/predict",{
       method:"POST",
