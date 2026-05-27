@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Sign Language Translator</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -142,7 +143,8 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
     <div class="card">
       <div class="card-label">Camera Feed</div>
       <div class="cam-wrap">
-        <video id="video" autoplay playsinline muted></video>
+        <video id="video" autoplay playsinline muted style="display:none"></video>
+        <canvas id="overlay-canvas" style="width:100%;height:100%;display:block;background:#000;border-radius:8px"></canvas>
         <div class="cam-border">
           <div class="cam-corner tl"></div><div class="cam-corner tr"></div>
           <div class="cam-corner bl"></div><div class="cam-corner br"></div>
@@ -293,10 +295,11 @@ function handlePrediction(d){
   }
 }
 
-// ── Camera + HTTP polling ─────────────────────────────────────────────────────
+// ── Camera + MediaPipe JS hand detection ─────────────────────────────────────
 let stream = null;
 let pollInterval = null;
-let polling = false;
+let mpHands = null;
+let handCamera = null;
 
 async function startCamera(){
   if(stream) return;
@@ -304,38 +307,107 @@ async function startCamera(){
     stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}});
     document.getElementById("video").srcObject = stream;
     setStatus("Camera ready — click Start Capture to begin");
+    await initMediaPipe();
   }catch(e){ setStatus("Camera error: "+e.message,"err"); }
+}
+
+async function initMediaPipe(){
+  // Load MediaPipe Hands from CDN
+  mpHands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  mpHands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.8,
+    minTrackingConfidence: 0.7
+  });
+  mpHands.onResults(onHandResults);
+  setStatus("MediaPipe ready — click Start Capture");
+}
+
+let lastLandmarks = null;
+let frameCount = 0;
+
+function onHandResults(results){
+  const canvas = document.getElementById("overlay-canvas");
+  const ctx = canvas.getContext("2d");
+  const video = document.getElementById("video");
+  const W = video.videoWidth || 640;
+  const H = video.videoHeight || 480;
+  canvas.width = W;
+  canvas.height = H;
+
+  // Show full camera feed
+  ctx.drawImage(video, 0, 0, W, H);
+
+  if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+    lastLandmarks = results.multiHandLandmarks; // store ALL hands
+
+    // Draw bounding box around each hand
+    results.multiHandLandmarks.forEach(lm => {
+      const xs = lm.map(l => l.x * W);
+      const ys = lm.map(l => l.y * H);
+      const pad = 20;
+      const x1 = Math.max(0, Math.min(...xs) - pad);
+      const y1 = Math.max(0, Math.min(...ys) - pad);
+      const x2 = Math.min(W, Math.max(...xs) + pad);
+      const y2 = Math.min(H, Math.max(...ys) + pad);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+    });
+
+    document.getElementById("hand-dot").className = "hand-dot on";
+    const count = results.multiHandLandmarks.length;
+    document.getElementById("hand-status").textContent = count === 2 ? "Both hands detected" : "Hand detected";
+    document.getElementById("cam-hint").textContent = "Hold gesture steady";
+  } else {
+    lastLandmarks = null;
+    document.getElementById("hand-dot").className = "hand-dot";
+    document.getElementById("hand-status").textContent = "No hand";
+    document.getElementById("cam-hint").textContent = "Show your hand to the camera";
+  }
 }
 
 function startPolling(){
   if(pollInterval) clearInterval(pollInterval);
-  const video  = document.getElementById("video");
-  const canvas = document.createElement("canvas");
-  canvas.width = 320; canvas.height = 240;
-  const ctx    = canvas.getContext("2d");
-  polling = false;
+  const video = document.getElementById("video");
+  frameCount = 0;
 
-  pollInterval = setInterval(async ()=>{
-    if(!capturing || !stream || polling) return;
-    polling = true;
-    ctx.drawImage(video, 0, 0, 320, 240);
-    const img = canvas.toDataURL("image/jpeg", 0.6);
-    try{
-      const r = await fetch("/predict",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({image: img})
-      });
-      const d = await r.json();
-      handlePrediction(d);
-    }catch(e){ /* ignore transient errors */ }
-    finally{ polling = false; }
-  }, 150); // ~6-7fps
+  // Process frames through MediaPipe
+  const processFrame = async () => {
+    if(!capturing) return;
+    frameCount++;
+    if(mpHands && video.readyState >= 2){
+      await mpHands.send({image: video});
+    }
+    // Send landmarks to server every 3rd frame
+    if(frameCount % 3 === 0 && lastLandmarks){
+      sendLandmarks(lastLandmarks);
+    } else if(frameCount % 3 === 0 && !lastLandmarks){
+      handlePrediction({hand:false, letter:"—", conf:0, stable:false, status:"No Hand Detected", top3:[]});
+    }
+    if(capturing) requestAnimationFrame(processFrame);
+  };
+  requestAnimationFrame(processFrame);
+}
+
+async function sendLandmarks(lmList){
+  // lmList is array of hands, each hand has 21 landmarks
+  const hands = lmList.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
+  try{
+    const r = await fetch("/predict",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({hands})
+    });
+    const d = await r.json();
+    handlePrediction(d);
+  }catch(e){}
 }
 
 function stopPolling(){
   if(pollInterval){ clearInterval(pollInterval); pollInterval=null; }
-  polling = false;
+  capturing = false;
 }
 
 // ── Sentence builder ──────────────────────────────────────────────────────────
@@ -418,8 +490,9 @@ function showSlide(i){
   const s=slideData[i]; if(!s) return;
   const img=document.getElementById("slide-img");
   const sp=document.getElementById("slide-space");
-  if(s.img){img.src=s.img;img.style.display="block";sp.style.display="none";}
-  else{img.style.display="none";sp.style.display="flex";}
+  if(window._frameTimer){ clearInterval(window._frameTimer); window._frameTimer=null; }
+  if(s.char==="SPC"||!s.img){ img.style.display="none"; sp.style.display="flex"; }
+  else { img.src=s.img; img.style.display="block"; sp.style.display="none"; }
   document.getElementById("slide-char").textContent=s.char;
   document.getElementById("slide-index").textContent=`${i+1} / ${slideData.length}`;
   document.getElementById("slide-bar").style.width=`${((i+1)/slideData.length)*100}%`;
@@ -432,7 +505,7 @@ function showSlide(i){
   slideIdx=i;
 }
 function startSlideTimer(){ clearInterval(slideTimer); slideTimer=setInterval(()=>showSlide((slideIdx+1)%slideData.length),slideSpeed); }
-function togglePlay(){ slidePlaying=!slidePlaying; document.getElementById("play-btn").textContent=slidePlaying?"⏸":"▶"; if(slidePlaying)startSlideTimer(); else clearInterval(slideTimer); }
+function togglePlay(){ slidePlaying=!slidePlaying; document.getElementById("play-btn").textContent=slidePlaying?"⏸":"▶"; if(slidePlaying)startSlideTimer(); else { clearInterval(slideTimer); if(window._frameTimer) clearInterval(window._frameTimer); } }
 function slideNext(){ showSlide((slideIdx+1)%slideData.length); if(slidePlaying)startSlideTimer(); }
 function slidePrev(){ showSlide((slideIdx-1+slideData.length)%slideData.length); if(slidePlaying)startSlideTimer(); }
 function jumpTo(i){ showSlide(i); if(slidePlaying)startSlideTimer(); }
