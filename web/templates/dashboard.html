@@ -4,9 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Sign Language Translator</title>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0f172a;font-family:'Segoe UI',sans-serif;color:#f8fafc;min-height:100vh;display:flex;flex-direction:column}
@@ -24,41 +22,35 @@ main{flex:1;padding:20px 24px;display:flex;flex-direction:column;gap:16px;overfl
 .row-2{grid-template-columns:1fr 1.5fr}
 .card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:18px}
 .card-label{font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
-
-/* Prediction card */
 .pred-card{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:260px;gap:10px}
-.big-letter{font-size:100px;font-weight:800;color:#38bdf8;line-height:1;min-height:110px;display:flex;align-items:center;justify-content:center;transition:all .15s}
-.big-letter.new{animation:pop .2s ease}
-@keyframes pop{0%{transform:scale(1.4);color:#22c55e}100%{transform:scale(1);color:#38bdf8}}
+.big-letter{font-size:100px;font-weight:800;color:#38bdf8;line-height:1;min-height:110px;display:flex;align-items:center;justify-content:center}
+.big-letter.new{animation:pop .25s ease}
+@keyframes pop{0%{transform:scale(1.5);color:#22c55e}100%{transform:scale(1);color:#38bdf8}}
 .conf-wrap{width:200px}
 .conf-label{font-size:11px;color:#94a3b8;text-align:center;margin-bottom:4px}
 .conf-bar{height:6px;background:#0f172a;border-radius:3px;overflow:hidden}
-.conf-fill{height:100%;border-radius:3px;transition:width .2s,background .2s}
+.conf-fill{height:100%;border-radius:3px;transition:width .15s,background .15s}
 .status-pill{padding:3px 12px;border-radius:20px;font-size:11px;font-weight:600;background:#0f172a;color:#94a3b8}
 .status-pill.ready{background:#14532d;color:#4ade80}
 .status-pill.detecting{background:#1e3a5f;color:#38bdf8}
 .hand-dot{width:10px;height:10px;border-radius:50%;background:#334155;transition:.3s}
 .hand-dot.on{background:#22c55e;box-shadow:0 0 8px #22c55e}
-/* Top-3 */
 .top3{display:flex;gap:8px;margin-top:4px}
-.top3-item{display:flex;flex-direction:column;align-items:center;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:6px 12px;min-width:52px;transition:.2s}
+.top3-item{display:flex;flex-direction:column;align-items:center;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:6px 12px;min-width:52px}
 .top3-item.first{border-color:#38bdf8}
 .top3-letter{font-size:22px;font-weight:800;color:#38bdf8}
 .top3-conf{font-size:10px;color:#64748b}
-
-/* Camera */
-.cam-wrap{position:relative;border-radius:8px;overflow:hidden;background:#000;aspect-ratio:4/3}
-#video{width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1)}
+.cam-wrap{position:relative;border-radius:8px;overflow:hidden;background:#111;aspect-ratio:4/3}
+#video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#overlay-canvas{width:100%;height:100%;display:block;border-radius:8px}
 .cam-border{position:absolute;inset:0;border:2px solid #38bdf8;border-radius:8px;pointer-events:none}
 .cam-corner{position:absolute;width:18px;height:18px;border-color:#38bdf8;border-style:solid}
 .cam-corner.tl{top:6px;left:6px;border-width:2px 0 0 2px}
 .cam-corner.tr{top:6px;right:6px;border-width:2px 2px 0 0}
 .cam-corner.bl{bottom:6px;left:6px;border-width:0 0 2px 2px}
 .cam-corner.br{bottom:6px;right:6px;border-width:0 2px 2px 0}
-.cam-hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:#00000080;color:#38bdf8;font-size:11px;padding:3px 10px;border-radius:12px;white-space:nowrap}
-
-/* Sentence box */
-.sentence-box{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:14px 16px;min-height:56px;font-size:22px;font-weight:600;color:#f8fafc;letter-spacing:.05em;word-break:break-all;transition:.2s}
+.cam-hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:#00000090;color:#38bdf8;font-size:11px;padding:3px 10px;border-radius:12px;white-space:nowrap;z-index:2}
+.sentence-box{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:14px 16px;min-height:56px;font-size:22px;font-weight:600;color:#f8fafc;letter-spacing:.05em;word-break:break-all}
 .sentence-box:empty::before{content:"Start signing...";color:#334155;font-size:16px;font-weight:400}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .btn{padding:9px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:.2s}
@@ -67,8 +59,6 @@ main{flex:1;padding:20px 24px;display:flex;flex-direction:column;gap:16px;overfl
 .btn-del{background:#1e293b;color:#f87171;border:1px solid #f87171}.btn-del:hover{background:#f8717120}
 .btn-clear{background:#1e293b;color:#94a3b8;border:1px solid #334155}.btn-clear:hover{border-color:#f87171;color:#f87171}
 .hint-row{font-size:11px;color:#475569;margin-top:6px}
-
-/* Mode 2 */
 .m2-input-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
 .m2-input{flex:1;min-width:180px;padding:10px 14px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#f8fafc;font-size:14px;outline:none;transition:.2s}
 .m2-input:focus{border-color:#38bdf8}
@@ -81,8 +71,6 @@ main{flex:1;padding:20px 24px;display:flex;flex-direction:column;gap:16px;overfl
 .sign-img{width:130px;height:130px;object-fit:cover;border-radius:8px;border:1px solid #334155;background:#0f172a;cursor:pointer}
 .sign-char{font-size:14px;font-weight:700;color:#38bdf8}
 .sign-space{width:80px;height:130px;border-radius:8px;border:2px dashed #334155;display:flex;align-items:center;justify-content:center;color:#334155;font-size:11px}
-
-/* Slideshow */
 #slideshow{display:none;flex-direction:row;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px}
 .slide-img-wrap{position:relative;width:240px;height:240px;flex-shrink:0;background:#0f172a;border-radius:12px;border:2px solid #334155;display:flex;align-items:center;justify-content:center;overflow:hidden}
 #slide-img{width:100%;height:100%;object-fit:contain}
@@ -95,8 +83,6 @@ main{flex:1;padding:20px 24px;display:flex;flex-direction:column;gap:16px;overfl
 .slide-controls{display:flex;gap:8px;align-items:center}
 #play-btn{min-width:72px}
 select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6px;padding:5px 8px;font-size:12px}
-
-/* Status bar */
 .status-bar{background:#1e293b;border-top:1px solid #334155;padding:6px 24px;font-size:11px;color:#94a3b8;flex-shrink:0}
 #status-text{color:#4ade80}
 .panel{display:none}.panel.active{display:flex;flex-direction:column;gap:16px}
@@ -104,27 +90,20 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
 </style>
 </head>
 <body>
-
 <nav>
   <div class="nav-title">🤟 AI Sign Language Translator</div>
-  <div class="nav-right">
-    Logged in as <span>{{ username }}</span>
+  <div class="nav-right">Logged in as <span>{{ username }}</span>
     <a href="/logout" class="logout-btn">Logout</a>
   </div>
 </nav>
-
 <div class="tabs">
   <div class="tab active" onclick="switchMode(1)">👁 Mode 1 — Live Sign to Text</div>
   <div class="tab" onclick="switchMode(2)">🎙 Mode 2 — Text/Speech to Sign</div>
 </div>
-
 <main>
-
-<!-- ══ MODE 1 ══════════════════════════════════════════════════════════════ -->
+<!-- MODE 1 -->
 <div id="panel-1" class="panel active">
   <div class="row row-2">
-
-    <!-- Prediction -->
     <div class="card pred-card">
       <div class="card-label">Live Prediction</div>
       <div style="display:flex;align-items:center;gap:8px">
@@ -139,13 +118,11 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
       <div class="status-pill" id="pred-status">Waiting</div>
       <div class="top3" id="top3-row" style="display:none"></div>
     </div>
-
-    <!-- Camera -->
     <div class="card">
       <div class="card-label">Camera Feed</div>
       <div class="cam-wrap">
-        <video id="video" autoplay playsinline muted style="display:none"></video>
-        <canvas id="overlay-canvas" style="width:100%;height:100%;display:block;background:#000;border-radius:8px"></canvas>
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay-canvas"></canvas>
         <div class="cam-border">
           <div class="cam-corner tl"></div><div class="cam-corner tr"></div>
           <div class="cam-corner bl"></div><div class="cam-corner br"></div>
@@ -154,42 +131,33 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
       </div>
     </div>
   </div>
-
-    <!-- Sentence builder -->
   <div class="card">
     <div class="card-label">Sentence Builder</div>
     <div style="display:flex;gap:8px;margin-bottom:10px">
-      <button class="btn" id="capture-btn" onclick="toggleCapture()"
-        style="background:#22c55e;color:#0f172a;font-weight:700;padding:9px 20px">
-        ▶ Start Capture
-      </button>
-      <span style="font-size:12px;color:#475569;align-self:center" id="capture-hint">
-        Click Start to begin detecting signs
-      </span>
+      <button class="btn" id="capture-btn" onclick="toggleCapture()" style="background:#22c55e;color:#0f172a;font-weight:700;padding:9px 20px">▶ Start Capture</button>
+      <span style="font-size:12px;color:#475569;align-self:center" id="capture-hint">Click Start to begin detecting signs</span>
     </div>
     <div class="sentence-box" id="sentence-box"></div>
     <div class="actions">
       <button class="btn btn-speak" onclick="speakSentence()">🔊 Speak</button>
       <button class="btn btn-space" onclick="addSpace()">⎵ Space</button>
-      <button class="btn btn-del"   onclick="deleteLast()">⌫ Delete</button>
+      <button class="btn btn-del" onclick="deleteLast()">⌫ Delete</button>
       <button class="btn btn-clear" onclick="clearSentence()">✕ Clear</button>
     </div>
-    <div class="hint-row">Signs are added automatically when detected stably. Click Speak to hear the full sentence.</div>
+    <div class="hint-row">Signs are added automatically when detected stably.</div>
   </div>
   <audio id="audio-player"></audio>
 </div>
-
-<!-- ══ MODE 2 ══════════════════════════════════════════════════════════════ -->
+<!-- MODE 2 -->
 <div id="panel-2" class="panel">
   <div class="card">
     <div class="card-label">Input</div>
     <div class="m2-input-row">
-      <input class="m2-input" id="m2-text" type="text" placeholder="Type text or click mic to speak...">
+      <input class="m2-input" id="m2-text" type="text" placeholder="Type text or click mic...">
       <button class="btn" style="background:#38bdf8;color:#0f172a;font-weight:700" onclick="textToSign()">Show Signs</button>
       <div class="mic-btn" id="mic-btn" onclick="toggleSpeech()" title="Speak">🎙</div>
     </div>
   </div>
-
   <div class="card">
     <div class="card-label">Sign Language Output</div>
     <div id="slideshow">
@@ -217,174 +185,63 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
     <div id="signs-grid" class="signs-grid"><p style="color:#475569;font-size:13px">Signs will appear here...</p></div>
   </div>
 </div>
-
 </main>
-
-<div class="status-bar">Status: <span id="status-text">Ready</span></div>
+<div class="status-bar">Status: <span id="status-text">Loading...</span></div>
 
 <script>
-// ── Capture toggle ────────────────────────────────────────────────────────────
-let capturing = false;
-function toggleCapture(){
-  capturing = !capturing;
-  const btn  = document.getElementById("capture-btn");
-  const hint = document.getElementById("capture-hint");
-  if(capturing){
-    btn.style.background  = "#f87171";
-    btn.style.color       = "#fff";
-    btn.textContent       = "⏹ Stop Capture";
-    hint.textContent      = "Detecting signs — show your hand";
-    startPolling();
-  } else {
-    btn.style.background  = "#22c55e";
-    btn.style.color       = "#0f172a";
-    btn.textContent       = "▶ Start Capture";
-    hint.textContent      = "Click Start to begin detecting signs";
-    stopPolling();
-    lastLandmarks = null;
-    // Reset server state so same letter can be re-detected next time
-    fetch("/reset_state", {method:"POST"}).catch(()=>{});
-    document.getElementById("pred-letter").textContent = "—";
-    document.getElementById("conf-label").textContent  = "Confidence: 0%";
-    document.getElementById("conf-fill").style.width   = "0%";
-    document.getElementById("pred-status").textContent = "Stopped";
-    document.getElementById("pred-status").className   = "status-pill";
-    document.getElementById("hand-dot").className      = "hand-dot";
-    document.getElementById("hand-status").textContent = "No hand";
-    document.getElementById("top3-row").style.display  = "none";
-    document.getElementById("cam-hint").textContent    = "Show your hand to the camera";
-  }
-}
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let capturing    = false;
+let stream       = null;
+let mpHands      = null;
+let mpReady      = false;
+let pollTimer    = null;
+let sendPending  = false;
+let lastLandmarks = null;   // single source of truth — set by onHandResults
+let sentence     = [];
 
-function handlePrediction(d){
-  const dot = document.getElementById("hand-dot");
-  const hs  = document.getElementById("hand-status");
-  dot.className = "hand-dot" + (d.hand ? " on" : "");
-  hs.textContent = d.hand ? "Hand detected" : "No hand";
-  document.getElementById("cam-hint").textContent =
-    d.hand ? "Hold gesture steady" : "Show your hand to the camera";
-
-  const letterEl = document.getElementById("pred-letter");
-  letterEl.textContent = d.letter || "—";
-
-  const conf = d.conf || 0;
-  document.getElementById("conf-label").textContent = `Confidence: ${conf}%`;
-  const fill = document.getElementById("conf-fill");
-  fill.style.width = conf + "%";
-  fill.style.background = conf>=80?"#22c55e":conf>=60?"#f59e0b":"#f87171";
-
-  const pill = document.getElementById("pred-status");
-  if(d.stable){ pill.className="status-pill ready"; pill.textContent="Stable ✓"; }
-  else if(d.hand){ pill.className="status-pill detecting"; pill.textContent="Detecting..."; }
-  else{ pill.className="status-pill"; pill.textContent="Waiting"; }
-
-  // Top-3 predictions
-  const t3row = document.getElementById("top3-row");
-  if(d.top3 && d.top3.length && d.hand){
-    t3row.style.display = "flex";
-    t3row.innerHTML = d.top3.map((item,i)=>
-      `<div class="top3-item${i===0?' first':''}">
-        <div class="top3-letter">${item[0]}</div>
-        <div class="top3-conf">${item[1]}%</div>
-      </div>`
-    ).join("");
-  } else {
-    t3row.style.display = "none";
-  }
-
-  if(d.new_letter){
-    letterEl.classList.remove("new");
-    void letterEl.offsetWidth;
-    letterEl.classList.add("new");
-    appendLetter(d.new_letter);
-    setStatus(`Added: ${d.new_letter}`);
-  }
-}
-
-// ── Camera + MediaPipe JS hand detection ─────────────────────────────────────
-let stream = null;
-let pollInterval = null;
-let mpHands = null;
-let handCamera = null;
-
+// ═══════════════════════════════════════════════════════════
+// CAMERA
+// ═══════════════════════════════════════════════════════════
 async function startCamera(){
   if(stream) return;
   try{
-    stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}});
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{width:640, height:480, facingMode:"user"}
+    });
     const video = document.getElementById("video");
     video.srcObject = stream;
-    // Show video immediately in canvas while MediaPipe loads
-    video.onloadedmetadata = () => {
-      const canvas = document.getElementById("overlay-canvas");
-      const ctx = canvas.getContext("2d");
-      const drawFrame = () => {
-        if(!stream) return;
-        canvas.width  = video.videoWidth  || 640;
-        canvas.height = video.videoHeight || 480;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        requestAnimationFrame(drawFrame);
-      };
-      requestAnimationFrame(drawFrame);
-    };
-    setStatus("Camera ready — loading MediaPipe...");
-    await initMediaPipe();
-  }catch(e){
-    setStatus("Camera error: "+e.message, "err");
+    await new Promise(r => { video.onloadedmetadata = r; });
+    await video.play();
+    startCanvasLoop();
+    setStatus("Camera ready — loading hand detector...");
+    loadMediaPipe();
+  } catch(e){
+    setStatus("Camera error: " + e.message, "err");
   }
 }
 
-async function initMediaPipe(){
-  try{
-    if(typeof Hands === "undefined"){
-      throw new Error("MediaPipe not loaded");
-    }
-    mpHands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-    mpHands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 0,
-      minDetectionConfidence: 0.8,
-      minTrackingConfidence: 0.7
-    });
-    mpHands.onResults(onHandResults);
-    // Warm up
-    const video = document.getElementById("video");
-    if(video.readyState >= 2) await mpHands.send({image: video});
-    setStatus("Ready — click Start Capture");
-  }catch(e){
-    setStatus("MediaPipe load failed — retrying...", "warn");
-    setTimeout(initMediaPipe, 2000);
-  }
-}
-
-let lastLandmarks = null;
-let frameCount = 0;
-
-function onHandResults(results){
+// Draw camera feed to canvas continuously
+function startCanvasLoop(){
+  const video  = document.getElementById("video");
   const canvas = document.getElementById("overlay-canvas");
-  const ctx = canvas.getContext("2d");
-  const video = document.getElementById("video");
-  const W = video.videoWidth || 640;
-  const H = video.videoHeight || 480;
-  canvas.width = W;
-  canvas.height = H;
+  const ctx    = canvas.getContext("2d");
 
-  // Show full camera feed
-  ctx.drawImage(video, 0, 0, W, H);
+  function draw(){
+    if(!stream) return;
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    ctx.save();
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.restore();
 
-  if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
-    // Filter out false detections (too small or too large)
-    const validHands = results.multiHandLandmarks.filter(lm => {
-      const xs = lm.map(l => l.x);
-      const ys = lm.map(l => l.y);
-      const bw = Math.max(...xs) - Math.min(...xs);
-      const bh = Math.max(...ys) - Math.min(...ys);
-      return bw > 0.05 && bh > 0.05 && bw < 0.85 && bh < 0.85;
-    });
-
-    if(validHands.length > 0){
-      lastLandmarks = validHands;
-      validHands.forEach(lm => {
-        const xs = lm.map(l => l.x * W);
+    // Draw hand boxes if available
+    if(lastLandmarks && capturing){
+      lastLandmarks.forEach(lm => {
+        const W = canvas.width, H = canvas.height;
+        const xs = lm.map(l => (1 - l.x) * W);  // mirrored
         const ys = lm.map(l => l.y * H);
         const pad = 20;
         const x1 = Math.max(0, Math.min(...xs) - pad);
@@ -392,201 +249,341 @@ function onHandResults(results){
         const x2 = Math.min(W, Math.max(...xs) + pad);
         const y2 = Math.min(H, Math.max(...ys) + pad);
         ctx.strokeStyle = "#38bdf8";
-        ctx.lineWidth = 2;
+        ctx.lineWidth   = 2;
         ctx.strokeRect(x1, y1, x2-x1, y2-y1);
       });
-      document.getElementById("hand-dot").className = "hand-dot on";
-      document.getElementById("hand-status").textContent = validHands.length === 2 ? "Both hands detected" : "Hand detected";
-      document.getElementById("cam-hint").textContent = "Hold gesture steady";
-    } else {
-      lastLandmarks = null;
-      document.getElementById("hand-dot").className = "hand-dot";
-      document.getElementById("hand-status").textContent = "No hand";
-      document.getElementById("cam-hint").textContent = "Show your hand to the camera";
     }
-  } else {
-    lastLandmarks = null;
-    document.getElementById("hand-dot").className = "hand-dot";
-    document.getElementById("hand-status").textContent = "No hand";
-    document.getElementById("cam-hint").textContent = "Show your hand to the camera";
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MEDIAPIPE
+// ═══════════════════════════════════════════════════════════
+function loadMediaPipe(){
+  if(typeof Hands === "undefined"){
+    setStatus("Loading hand detector...", "warn");
+    setTimeout(loadMediaPipe, 1000);
+    return;
+  }
+  try{
+    mpHands = new Hands({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`
+    });
+    mpHands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 0,
+      minDetectionConfidence: 0.75,
+      minTrackingConfidence: 0.65
+    });
+    mpHands.onResults(onHandResults);
+    mpReady = true;
+    setStatus("Ready — click Start Capture");
+  } catch(e){
+    setStatus("Hand detector error: " + e.message, "err");
   }
 }
 
-let lastLandmarks = null;
-let sendPending = false;
+function onHandResults(results){
+  if(!capturing) return;
 
-function startPolling(){
-  if(pollInterval) clearInterval(pollInterval);
-  const video = document.getElementById("video");
+  if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+    // Filter valid hands by bounding box size
+    const valid = results.multiHandLandmarks.filter(lm => {
+      const xs = lm.map(l => l.x), ys = lm.map(l => l.y);
+      const bw = Math.max(...xs) - Math.min(...xs);
+      const bh = Math.max(...ys) - Math.min(...ys);
+      return bw > 0.04 && bh > 0.04 && bw < 0.92 && bh < 0.92;
+    });
+    lastLandmarks = valid.length > 0 ? valid : null;
+  } else {
+    lastLandmarks = null;
+  }
 
-  // MediaPipe runs at full camera FPS — non-blocking
-  const mpLoop = async () => {
-    if(!capturing) return;
-    if(mpHands && video.readyState >= 2){
-      await mpHands.send({image: video});
-    }
-    if(capturing) requestAnimationFrame(mpLoop);
-  };
-  requestAnimationFrame(mpLoop);
-
-  // Server predictions at 10fps — independent, non-blocking
-  pollInterval = setInterval(() => {
-    if(!capturing || sendPending) return;
-    if(lastLandmarks){
-      sendLandmarks(lastLandmarks);
-    } else {
-      handlePrediction({hand:false, letter:"—", conf:0, stable:false,
-                        status:"No Hand Detected", top3:[]});
-    }
-  }, 100);
+  // Update hand indicator immediately
+  const hasHand = lastLandmarks !== null;
+  document.getElementById("hand-dot").className = "hand-dot" + (hasHand ? " on" : "");
+  document.getElementById("hand-status").textContent = hasHand
+    ? (lastLandmarks.length === 2 ? "Both hands" : "Hand detected")
+    : "No hand";
+  document.getElementById("cam-hint").textContent = hasHand
+    ? "Hold gesture steady" : "Show your hand to the camera";
 }
 
-async function sendLandmarks(lmList){
+// ═══════════════════════════════════════════════════════════
+// CAPTURE TOGGLE
+// ═══════════════════════════════════════════════════════════
+function toggleCapture(){
+  capturing = !capturing;
+  const btn  = document.getElementById("capture-btn");
+  const hint = document.getElementById("capture-hint");
+
+  if(capturing){
+    btn.style.background = "#f87171";
+    btn.style.color      = "#fff";
+    btn.textContent      = "⏹ Stop Capture";
+    hint.textContent     = "Detecting signs — show your hand";
+    startPredictionLoop();
+  } else {
+    btn.style.background = "#22c55e";
+    btn.style.color      = "#0f172a";
+    btn.textContent      = "▶ Start Capture";
+    hint.textContent     = "Click Start to begin detecting signs";
+    stopPredictionLoop();
+    lastLandmarks = null;
+    fetch("/reset_state", {method:"POST"}).catch(()=>{});
+    resetPredUI();
+  }
+}
+
+function resetPredUI(){
+  document.getElementById("pred-letter").textContent = "—";
+  document.getElementById("conf-label").textContent  = "Confidence: 0%";
+  document.getElementById("conf-fill").style.width   = "0%";
+  document.getElementById("pred-status").textContent = "Stopped";
+  document.getElementById("pred-status").className   = "status-pill";
+  document.getElementById("hand-dot").className      = "hand-dot";
+  document.getElementById("hand-status").textContent = "No hand";
+  document.getElementById("top3-row").style.display  = "none";
+  document.getElementById("cam-hint").textContent    = "Show your hand to the camera";
+}
+
+// ═══════════════════════════════════════════════════════════
+// PREDICTION LOOP — MediaPipe + server decoupled
+// ═══════════════════════════════════════════════════════════
+function startPredictionLoop(){
+  // MediaPipe processes frames at ~15fps
+  const video = document.getElementById("video");
+  const mpLoop = async () => {
+    if(!capturing) return;
+    if(mpReady && mpHands && video.readyState >= 2){
+      try{ await mpHands.send({image: video}); } catch(e){}
+    }
+    if(capturing) setTimeout(mpLoop, 66); // ~15fps
+  };
+  mpLoop();
+
+  // Server predictions at 8fps — non-blocking
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if(!capturing || sendPending) return;
+    if(lastLandmarks){
+      await sendToServer(lastLandmarks);
+    } else {
+      handlePrediction({hand:false, letter:"—", conf:0, stable:false, status:"No Hand Detected", top3:[]});
+    }
+  }, 125);
+}
+
+function stopPredictionLoop(){
+  if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  sendPending = false;
+}
+
+async function sendToServer(lmList){
   sendPending = true;
   const hands = lmList.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
   try{
-    const r = await fetch("/predict",{
+    const r = await fetch("/predict", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({hands})
     });
-    const d = await r.json();
-    handlePrediction(d);
-  }catch(e){}
-  finally{ sendPending = false; }
+    if(r.ok){
+      const d = await r.json();
+      handlePrediction(d);
+    }
+  } catch(e){
+    // Network error — ignore
+  } finally{
+    sendPending = false;
+  }
 }
 
-function stopPolling(){
-  capturing = false;
-  lastLandmarks = null;
+// ═══════════════════════════════════════════════════════════
+// HANDLE PREDICTION RESPONSE
+// ═══════════════════════════════════════════════════════════
+function handlePrediction(d){
+  const letterEl = document.getElementById("pred-letter");
+  letterEl.textContent = d.letter || "—";
+
+  const conf = d.conf || 0;
+  document.getElementById("conf-label").textContent = `Confidence: ${conf}%`;
+  const fill = document.getElementById("conf-fill");
+  fill.style.width      = conf + "%";
+  fill.style.background = conf>=75?"#22c55e":conf>=50?"#f59e0b":"#f87171";
+
+  const pill = document.getElementById("pred-status");
+  if(d.stable){
+    pill.className   = "status-pill ready";
+    pill.textContent = "Stable ✓";
+  } else if(d.hand){
+    pill.className   = "status-pill detecting";
+    pill.textContent = "Detecting...";
+  } else {
+    pill.className   = "status-pill";
+    pill.textContent = "Waiting";
+  }
+
+  // Top-3
+  const t3 = document.getElementById("top3-row");
+  if(d.top3 && d.top3.length && d.hand){
+    t3.style.display = "flex";
+    t3.innerHTML = d.top3.map((item,i) =>
+      `<div class="top3-item${i===0?" first":""}">
+        <div class="top3-letter">${item[0]}</div>
+        <div class="top3-conf">${item[1]}%</div>
+      </div>`
+    ).join("");
+  } else {
+    t3.style.display = "none";
+  }
+
+  if(d.new_letter){
+    letterEl.classList.remove("new");
+    void letterEl.offsetWidth;
+    letterEl.classList.add("new");
+    appendLetter(d.new_letter);
+    setStatus("Added: " + d.new_letter);
+  }
 }
 
-// ── Sentence builder ──────────────────────────────────────────────────────────
-let sentence = [];
-
-function appendLetter(l){
-  sentence.push(l);
-  renderSentence();
-}
+// ═══════════════════════════════════════════════════════════
+// SENTENCE BUILDER
+// ═══════════════════════════════════════════════════════════
+function appendLetter(l){ sentence.push(l); renderSentence(); }
 function addSpace(){ sentence.push(" "); renderSentence(); setStatus("Space added"); }
 function deleteLast(){ if(sentence.length){ sentence.pop(); renderSentence(); } }
 function clearSentence(){
-  sentence=[];
+  sentence = [];
   renderSentence();
   setStatus("Cleared");
-  // Reset server-side detection state so same letter can be re-detected
-  fetch("/reset_state",{method:"POST"}).catch(()=>{});
+  fetch("/reset_state", {method:"POST"}).catch(()=>{});
 }
-
 function renderSentence(){
-  const box = document.getElementById("sentence-box");
-  box.textContent = sentence.join("");
+  document.getElementById("sentence-box").textContent = sentence.join("");
 }
 
 async function speakSentence(){
   const text = sentence.join("").trim();
   if(!text){ setStatus("Nothing to speak","warn"); return; }
   setStatus("Generating speech...");
-  const r = await fetch("/speak",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
-  const d = await r.json();
-  if(!d.ok){ setStatus("Speech error","err"); return; }
-  const audio = document.getElementById("audio-player");
-  audio.src = d.url+"?t="+Date.now();
-  audio.play();
-  setStatus(`Speaking: "${text}"`);
+  try{
+    const r = await fetch("/speak",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
+    const d = await r.json();
+    if(!d.ok){ setStatus("Speech error: "+(d.msg||""),"err"); return; }
+    const audio = document.getElementById("audio-player");
+    audio.src = d.url + "?t=" + Date.now();
+    audio.play();
+    setStatus(`Speaking: "${text}"`);
+  } catch(e){ setStatus("Speech error","err"); }
 }
 
-// ── Mode switching ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// MODE SWITCHING
+// ═══════════════════════════════════════════════════════════
 function switchMode(n){
-  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
-  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
   document.getElementById("panel-"+n).classList.add("active");
   document.querySelectorAll(".tab")[n-1].classList.add("active");
   if(n===1) startCamera();
-  else {
-    stopPolling();
-    capturing = false;
-  }
+  else { stopPredictionLoop(); capturing = false; }
 }
 
-// ── Mode 2 slideshow ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// MODE 2 — SLIDESHOW
+// ═══════════════════════════════════════════════════════════
 let slideData=[], slideIdx=0, slideTimer=null, slideSpeed=1000, slidePlaying=true;
 
 async function textToSign(){
   const text = document.getElementById("m2-text").value.trim();
   if(!text){ setStatus("Enter text first","warn"); return; }
   setStatus("Loading signs...");
-  const r = await fetch("/signs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
-  const d = await r.json();
-  if(!d.ok){ setStatus("Error","err"); return; }
-  renderSigns(d.signs, text);
-  setStatus(`${d.signs.length} signs for "${text}"`);
+  try{
+    const r = await fetch("/signs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
+    const d = await r.json();
+    if(!d.ok){ setStatus("Error: "+(d.msg||""),"err"); return; }
+    renderSigns(d.signs);
+    setStatus(`${d.signs.length} signs for "${text}"`);
+  } catch(e){ setStatus("Error loading signs","err"); }
 }
 
-function renderSigns(signs, text){
+function renderSigns(signs){
   slideData = signs;
   if(!signs.length){ document.getElementById("signs-grid").innerHTML="<p style='color:#475569'>No signs found.</p>"; return; }
-  document.getElementById("slideshow").style.display="flex";
-  const dots = document.getElementById("slide-dots");
-  dots.innerHTML = signs.map((_,i)=>`<div id="dot-${i}" style="width:7px;height:7px;border-radius:50%;background:#334155;transition:.2s"></div>`).join("");
-  document.getElementById("signs-grid").innerHTML = signs.map((s,i)=>{
-    const img = s.img ? `<img class="sign-img" src="${s.img}" onclick="jumpTo(${i})">` : `<div class="sign-space">SPC</div>`;
+  document.getElementById("slideshow").style.display = "flex";
+  document.getElementById("slide-dots").innerHTML = signs.map((_,i) =>
+    `<div id="dot-${i}" style="width:7px;height:7px;border-radius:50%;background:#334155;transition:.2s"></div>`
+  ).join("");
+  document.getElementById("signs-grid").innerHTML = signs.map((s,i) => {
+    const img = s.img
+      ? `<img class="sign-img" src="${s.img}" onclick="jumpTo(${i})">`
+      : `<div class="sign-space">SPC</div>`;
     return `<div class="sign-cell" id="cell-${i}">${img}<div class="sign-char">${s.char}</div></div>`;
   }).join("");
-  slideIdx=0; slidePlaying=true;
+  slideIdx = 0; slidePlaying = true;
   showSlide(0); startSlideTimer();
 }
 
 function showSlide(i){
-  const s=slideData[i]; if(!s) return;
-  const img=document.getElementById("slide-img");
-  const sp=document.getElementById("slide-space");
-  if(window._frameTimer){ clearInterval(window._frameTimer); window._frameTimer=null; }
+  const s = slideData[i]; if(!s) return;
+  const img = document.getElementById("slide-img");
+  const sp  = document.getElementById("slide-space");
   if(s.char==="SPC"||!s.img){ img.style.display="none"; sp.style.display="flex"; }
   else { img.src=s.img; img.style.display="block"; sp.style.display="none"; }
-  document.getElementById("slide-char").textContent=s.char;
-  document.getElementById("slide-index").textContent=`${i+1} / ${slideData.length}`;
-  document.getElementById("slide-bar").style.width=`${((i+1)/slideData.length)*100}%`;
-  slideData.forEach((_,j)=>{
-    const d=document.getElementById("dot-"+j);
-    if(d) d.style.background=j===i?"#38bdf8":j<i?"#1e4a6e":"#334155";
-    const c=document.getElementById("cell-"+j);
-    if(c) c.style.outline=j===i?"2px solid #38bdf8":"none";
+  document.getElementById("slide-char").textContent  = s.char;
+  document.getElementById("slide-index").textContent = `${i+1} / ${slideData.length}`;
+  document.getElementById("slide-bar").style.width   = `${((i+1)/slideData.length)*100}%`;
+  slideData.forEach((_,j) => {
+    const dot  = document.getElementById("dot-"+j);
+    const cell = document.getElementById("cell-"+j);
+    if(dot)  dot.style.background  = j===i?"#38bdf8":j<i?"#1e4a6e":"#334155";
+    if(cell) cell.style.outline    = j===i?"2px solid #38bdf8":"none";
   });
-  slideIdx=i;
+  slideIdx = i;
 }
 function startSlideTimer(){ clearInterval(slideTimer); slideTimer=setInterval(()=>showSlide((slideIdx+1)%slideData.length),slideSpeed); }
-function togglePlay(){ slidePlaying=!slidePlaying; document.getElementById("play-btn").textContent=slidePlaying?"⏸":"▶"; if(slidePlaying)startSlideTimer(); else { clearInterval(slideTimer); if(window._frameTimer) clearInterval(window._frameTimer); } }
+function togglePlay(){ slidePlaying=!slidePlaying; document.getElementById("play-btn").textContent=slidePlaying?"⏸":"▶"; if(slidePlaying)startSlideTimer(); else clearInterval(slideTimer); }
 function slideNext(){ showSlide((slideIdx+1)%slideData.length); if(slidePlaying)startSlideTimer(); }
 function slidePrev(){ showSlide((slideIdx-1+slideData.length)%slideData.length); if(slidePlaying)startSlideTimer(); }
 function jumpTo(i){ showSlide(i); if(slidePlaying)startSlideTimer(); }
 function setSpeed(){ slideSpeed=parseInt(document.getElementById("speed-sel").value); if(slidePlaying)startSlideTimer(); }
 
-// ── Speech recognition (Mode 2) ───────────────────────────────────────────────
-let recognition=null;
+// ═══════════════════════════════════════════════════════════
+// SPEECH RECOGNITION (Mode 2)
+// ═══════════════════════════════════════════════════════════
+let recognition = null;
 function toggleSpeech(){
-  const btn=document.getElementById("mic-btn");
-  if(recognition){recognition.stop();recognition=null;btn.classList.remove("listening");return;}
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){setStatus("Speech not supported","err");return;}
-  recognition=new SR(); recognition.lang="en-US"; recognition.interimResults=false;
-  recognition.onstart=()=>{btn.classList.add("listening");setStatus("Listening...");};
-  recognition.onresult=e=>{const t=e.results[0][0].transcript;document.getElementById("m2-text").value=t;textToSign();};
-  recognition.onerror=e=>{setStatus("Speech error: "+e.error,"err");};
-  recognition.onend=()=>{btn.classList.remove("listening");recognition=null;};
+  const btn = document.getElementById("mic-btn");
+  if(recognition){ recognition.stop(); recognition=null; btn.classList.remove("listening"); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){ setStatus("Speech not supported","err"); return; }
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+  recognition.onstart  = () => { btn.classList.add("listening"); setStatus("Listening..."); };
+  recognition.onresult = e  => { document.getElementById("m2-text").value=e.results[0][0].transcript; textToSign(); };
+  recognition.onerror  = e  => { setStatus("Speech error: "+e.error,"err"); };
+  recognition.onend    = () => { btn.classList.remove("listening"); recognition=null; };
   recognition.start();
 }
 
-// ── Status ────────────────────────────────────────────────────────────────────
-function setStatus(msg,type="ok"){
-  const el=document.getElementById("status-text");
-  el.textContent=msg;
-  el.style.color=type==="err"?"#f87171":type==="warn"?"#f59e0b":"#4ade80";
+// ═══════════════════════════════════════════════════════════
+// STATUS
+// ═══════════════════════════════════════════════════════════
+function setStatus(msg, type="ok"){
+  const el = document.getElementById("status-text");
+  el.textContent = msg;
+  el.style.color = type==="err"?"#f87171":type==="warn"?"#f59e0b":"#4ade80";
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
 startCamera();
-document.getElementById("m2-text").addEventListener("keydown",e=>{if(e.key==="Enter")textToSign();});
+document.getElementById("m2-text").addEventListener("keydown", e => { if(e.key==="Enter") textToSign(); });
 </script>
 </body>
 </html>
