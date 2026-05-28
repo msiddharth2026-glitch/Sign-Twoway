@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Sign Language Translator</title>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -310,22 +311,49 @@ async function startCamera(){
   if(stream) return;
   try{
     stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}});
-    document.getElementById("video").srcObject = stream;
-    setStatus("Camera ready — click Start Capture to begin");
+    const video = document.getElementById("video");
+    video.srcObject = stream;
+    // Show video immediately in canvas while MediaPipe loads
+    video.onloadedmetadata = () => {
+      const canvas = document.getElementById("overlay-canvas");
+      const ctx = canvas.getContext("2d");
+      const drawFrame = () => {
+        if(!stream) return;
+        canvas.width  = video.videoWidth  || 640;
+        canvas.height = video.videoHeight || 480;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(drawFrame);
+      };
+      requestAnimationFrame(drawFrame);
+    };
+    setStatus("Camera ready — loading MediaPipe...");
     await initMediaPipe();
-  }catch(e){ setStatus("Camera error: "+e.message,"err"); }
+  }catch(e){
+    setStatus("Camera error: "+e.message, "err");
+  }
 }
 
 async function initMediaPipe(){
-  mpHands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-  mpHands.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 0,          // 0 = fast, 1 = accurate — use 0 for live
-    minDetectionConfidence: 0.85,
-    minTrackingConfidence: 0.75
-  });
-  mpHands.onResults(onHandResults);
-  setStatus("MediaPipe ready — click Start Capture");
+  try{
+    if(typeof Hands === "undefined"){
+      throw new Error("MediaPipe not loaded");
+    }
+    mpHands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    mpHands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 0,
+      minDetectionConfidence: 0.8,
+      minTrackingConfidence: 0.7
+    });
+    mpHands.onResults(onHandResults);
+    // Warm up
+    const video = document.getElementById("video");
+    if(video.readyState >= 2) await mpHands.send({image: video});
+    setStatus("Ready — click Start Capture");
+  }catch(e){
+    setStatus("MediaPipe load failed — retrying...", "warn");
+    setTimeout(initMediaPipe, 2000);
+  }
 }
 
 let lastLandmarks = null;
