@@ -317,13 +317,12 @@ async function startCamera(){
 }
 
 async function initMediaPipe(){
-  // Load MediaPipe Hands from CDN
   mpHands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
   mpHands.setOptions({
     maxNumHands: 2,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.9,
-    minTrackingConfidence: 0.8
+    modelComplexity: 0,          // 0 = fast, 1 = accurate — use 0 for live
+    minDetectionConfidence: 0.85,
+    minTrackingConfidence: 0.75
   });
   mpHands.onResults(onHandResults);
   setStatus("MediaPipe ready — click Start Capture");
@@ -385,46 +384,38 @@ function onHandResults(results){
   }
 }
 
+let lastLandmarks = null;
+let sendPending = false;
+
 function startPolling(){
   if(pollInterval) clearInterval(pollInterval);
   const video = document.getElementById("video");
-  frameCount = 0;
 
-  // Process frames through MediaPipe
-  const processFrame = async () => {
+  // MediaPipe runs at full camera FPS — non-blocking
+  const mpLoop = async () => {
     if(!capturing) return;
-    frameCount++;
     if(mpHands && video.readyState >= 2){
       await mpHands.send({image: video});
     }
-    // Send landmarks to server every 3rd frame
-    if(frameCount % 3 === 0 && lastLandmarks){
-      sendLandmarks(lastLandmarks);
-    } else if(frameCount % 3 === 0 && !lastLandmarks){
-      handlePrediction({hand:false, letter:"—", conf:0, stable:false, status:"No Hand Detected", top3:[]});
-    }
-    if(capturing) requestAnimationFrame(processFrame);
+    if(capturing) requestAnimationFrame(mpLoop);
   };
-  requestAnimationFrame(processFrame);
+  requestAnimationFrame(mpLoop);
+
+  // Server predictions at 10fps — independent, non-blocking
+  pollInterval = setInterval(() => {
+    if(!capturing || sendPending) return;
+    if(lastLandmarks){
+      sendLandmarks(lastLandmarks);
+    } else {
+      handlePrediction({hand:false, letter:"—", conf:0, stable:false,
+                        status:"No Hand Detected", top3:[]});
+    }
+  }, 100);
 }
 
 async function sendLandmarks(lmList){
-  // Validate each hand — reject if too small (face/body false detection)
-  const validHands = lmList.filter(lm => {
-    const xs = lm.map(l => l.x);
-    const ys = lm.map(l => l.y);
-    const bw = Math.max(...xs) - Math.min(...xs);
-    const bh = Math.max(...ys) - Math.min(...ys);
-    // Real hand: bbox between 5% and 80% of frame
-    return bw > 0.05 && bh > 0.05 && bw < 0.85 && bh < 0.85;
-  });
-
-  if(validHands.length === 0){
-    handlePrediction({hand:false, letter:"—", conf:0, stable:false, status:"No Hand Detected", top3:[]});
-    return;
-  }
-
-  const hands = validHands.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
+  sendPending = true;
+  const hands = lmList.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
   try{
     const r = await fetch("/predict",{
       method:"POST",
@@ -434,6 +425,7 @@ async function sendLandmarks(lmList){
     const d = await r.json();
     handlePrediction(d);
   }catch(e){}
+  finally{ sendPending = false; }
 }
 
 function stopPolling(){

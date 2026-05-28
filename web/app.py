@@ -59,7 +59,8 @@ else:
     rf_model = None
 
 def predict_landmarks(lm):
-    if not USE_MLP: return "?", 0.0
+    """Single inference call — returns label, conf, top3."""
+    if not USE_MLP: return "?", 0.0, []
     vec    = extract_features(lm).reshape(1, -1)
     vec_sc = scaler.transform(vec)
     mlp_p  = mlp_model.predict(vec_sc, verbose=0)[0]
@@ -68,22 +69,16 @@ def predict_landmarks(lm):
         probs = 0.6 * mlp_p + 0.4 * rf_p
     else:
         probs = mlp_p
-    idx = int(np.argmax(probs))
-    return str(label_encoder.inverse_transform([idx])[0]), float(probs[idx])
+    top_idx = np.argsort(probs)[::-1]
+    label = str(label_encoder.inverse_transform([top_idx[0]])[0])
+    conf  = float(probs[top_idx[0]])
+    top3  = [(str(label_encoder.inverse_transform([i])[0]).upper(), round(float(probs[i])*100))
+             for i in top_idx[:3]]
+    return label, conf, top3
 
 def top3_predictions(lm):
-    if not USE_MLP: return []
-    vec    = extract_features(lm).reshape(1, -1)
-    vec_sc = scaler.transform(vec)
-    mlp_p  = mlp_model.predict(vec_sc, verbose=0)[0]
-    if USE_RF:
-        rf_p  = rf_model.predict_proba(vec_sc)[0]
-        probs = 0.6 * mlp_p + 0.4 * rf_p
-    else:
-        probs = mlp_p
-    top_idx = np.argsort(probs)[::-1][:3]
-    return [(str(label_encoder.inverse_transform([i])[0]).upper(), round(float(probs[i])*100))
-            for i in top_idx]
+    _, _, t3 = predict_landmarks(lm)
+    return t3
 
 # ── Per-session state ──────────────────────────────────────────────────────────
 class ClientState:
@@ -252,8 +247,7 @@ def predict():
                        status="No Hand Detected", top3=[])
 
     # Predict
-    label, conf = predict_landmarks(lm_raw)
-    t3 = top3_predictions(lm_raw)
+    label, conf, t3 = predict_landmarks(lm_raw)
 
     if "unknown" in str(label).lower() or conf < 0.35:
         return jsonify(hand=True, letter="—", conf=round(conf * 100),
