@@ -1,4 +1,4 @@
-# Large files — excluded from git
+# Large files excluded
 X.pickle
 y.pickle
 web/rf_model.pkl
@@ -6,3 +6,8 @@ web/rf_model.pkl
 # Python cache
 __pycache__/
 *.pyc
+
+# Allow model files needed for deployment
+!web/landmark_model.keras
+!web/label_encoder.pkl
+!web/scaler.pkl
