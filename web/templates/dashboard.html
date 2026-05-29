@@ -198,7 +198,7 @@ let mpHands      = null;
 let mpReady      = false;
 let pollTimer    = null;
 let sendPending  = false;
-let lastLandmarks = null;   // single source of truth — set by onHandResults
+let lastLandmarks = null;
 let sentence     = [];
 
 // ═══════════════════════════════════════════════════════════
@@ -230,20 +230,23 @@ function startCanvasLoop(){
 
   function draw(){
     if(!stream) return;
-    canvas.width  = video.videoWidth  || 640;
-    canvas.height = video.videoHeight || 480;
+    const W = video.videoWidth  || 640;
+    const H = video.videoHeight || 480;
+    canvas.width  = W;
+    canvas.height = H;
+
+    // Normal mirrored feed
     ctx.save();
     ctx.scale(-1, 1);
-    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, -W, 0, W, H);
     ctx.restore();
 
-    // Draw ONE combined bounding box around all hands
+    // Draw combined hand bounding box
     if(lastLandmarks && capturing){
-      const W = canvas.width, H = canvas.height;
       let allXs = [], allYs = [];
       lastLandmarks.forEach(lm => {
         lm.forEach(l => {
-          allXs.push((1 - l.x) * W);  // mirrored
+          allXs.push((1 - l.x) * W);
           allYs.push(l.y * H);
         });
       });
@@ -314,6 +317,8 @@ function onHandResults(results){
     ? "Hold gesture steady" : "Show your hand to the camera";
 }
 
+}
+
 // ═══════════════════════════════════════════════════════════
 // CAPTURE TOGGLE
 // ═══════════════════════════════════════════════════════════
@@ -335,7 +340,7 @@ function toggleCapture(){
     hint.textContent     = "Click Start to begin detecting signs";
     stopPredictionLoop();
     lastLandmarks = null;
-    fetch("/reset_state", {method:"POST"}).catch(()=>{});
+fetch("/reset_state", {method:"POST"}).catch(()=>{});
     resetPredUI();
   }
 }
@@ -593,3 +598,4 @@ document.getElementById("m2-text").addEventListener("keydown", e => { if(e.key==
 </script>
 </body>
 </html>
+
