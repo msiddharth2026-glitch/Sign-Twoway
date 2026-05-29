@@ -94,7 +94,7 @@ def predict_landmarks(lm_list):
 # ── Per-session state ──────────────────────────────────────────────────────────
 class ClientState:
     def __init__(self):
-        self.buf           = deque(maxlen=10)
+        self.buf           = deque(maxlen=8)  # slightly smaller for faster response
         self.last_locked   = None
         self.lock_time     = 0.0
         self.no_hand_count = 0
@@ -193,7 +193,7 @@ def dashboard():
     return render_template("dashboard.html", username=session["user"])
 
 # ── Predict ────────────────────────────────────────────────────────────────────
-CONF_THRESHOLD = 0.70  # raised — only accept high-confidence predictions
+CONF_THRESHOLD = 0.65  # balanced — accurate but responsive
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -223,7 +223,16 @@ def predict():
 
     state.no_hand_count = 0
 
-    # Convert JSON dicts to LM objects
+    # Use only the largest hand (most prominent) for prediction
+    # Sort by bounding box area — largest = closest/most prominent
+    def hand_area(hand_lms):
+        xs = [l["x"] for l in hand_lms]
+        ys = [l["y"] for l in hand_lms]
+        return (max(xs)-min(xs)) * (max(ys)-min(ys))
+
+    raw_hands = sorted(raw_hands, key=hand_area, reverse=True)
+
+    # Convert JSON dicts to LM objects — use only primary (largest) hand
     try:
         lm_raw = [LM(l) for l in raw_hands[0]]
         if len(lm_raw) != 21:
@@ -255,13 +264,13 @@ def predict():
     counts   = Counter(l for l,_ in state.buf)
     top, cnt = counts.most_common(1)[0]
     avg_conf = float(np.mean([c for l,c in state.buf if l==top]))
-    stable   = cnt >= 5 and avg_conf >= CONF_THRESHOLD  # need 5 consistent frames
+    stable   = cnt >= 4 and avg_conf >= CONF_THRESHOLD  # 4 frames instead of 5
 
     new_letter = None
     now = time.time()
     if stable and top != "?":
         if top != state.last_locked:
-            if now - state.lock_time > 0.7:
+            if now - state.lock_time > 0.5:  # faster lock — was 0.7s
                 new_letter      = top.upper()
                 state.last_locked = top
                 state.lock_time   = now

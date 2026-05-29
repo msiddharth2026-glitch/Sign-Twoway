@@ -273,9 +273,9 @@ function loadMediaPipe(){
     });
     mpHands.setOptions({
       maxNumHands: 2,
-      modelComplexity: 0,
-      minDetectionConfidence: 0.75,
-      minTrackingConfidence: 0.65
+      modelComplexity: 1,          // 1 = more accurate (was 0)
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.6
     });
     mpHands.onResults(onHandResults);
     mpReady = true;
@@ -383,7 +383,15 @@ function stopPredictionLoop(){
 
 async function sendToServer(lmList){
   sendPending = true;
-  const hands = lmList.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
+  // Use only the largest hand (most prominent) — avoids confusion from second hand
+  const sorted = [...lmList].sort((a, b) => {
+    const area = lm => {
+      const xs = lm.map(l => l.x), ys = lm.map(l => l.y);
+      return (Math.max(...xs)-Math.min(...xs)) * (Math.max(...ys)-Math.min(...ys));
+    };
+    return area(b) - area(a);
+  });
+  const hands = [sorted[0].map(l => ({x:l.x, y:l.y, z:l.z}))];
   try{
     const r = await fetch("/predict", {
       method:"POST",
@@ -395,7 +403,6 @@ async function sendToServer(lmList){
       handlePrediction(d);
     }
   } catch(e){
-    // Network error — ignore
   } finally{
     sendPending = false;
   }
