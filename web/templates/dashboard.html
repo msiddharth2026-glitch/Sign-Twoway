@@ -328,7 +328,7 @@ function handlePrediction(d){
   const t3=document.getElementById("top3-row");
   if(d.top3&&d.top3.length&&d.hand){
     t3.style.display="flex";
-    t3.innerHTML=d.top3.map((item,i)=>`<div class="top3-item${i===0?" first":"'}"><div class="top3-letter">${item[0]}</div><div class="top3-conf">${item[1]}%</div></div>`).join("");
+    t3.innerHTML=d.top3.map((item,i)=>`<div class="top3-item${i===0?' first':''}"><div class="top3-letter">${item[0]}</div><div class="top3-conf">${item[1]}%</div></div>`).join("");
   } else { t3.style.display="none"; }
   if(d.new_letter){
     letterEl.classList.remove("new"); void letterEl.offsetWidth; letterEl.classList.add("new");
