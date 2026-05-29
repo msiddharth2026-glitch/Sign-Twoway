@@ -237,21 +237,24 @@ function startCanvasLoop(){
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
 
-    // Draw hand boxes if available
+    // Draw ONE combined bounding box around all hands
     if(lastLandmarks && capturing){
+      const W = canvas.width, H = canvas.height;
+      let allXs = [], allYs = [];
       lastLandmarks.forEach(lm => {
-        const W = canvas.width, H = canvas.height;
-        const xs = lm.map(l => (1 - l.x) * W);  // mirrored
-        const ys = lm.map(l => l.y * H);
-        const pad = 20;
-        const x1 = Math.max(0, Math.min(...xs) - pad);
-        const y1 = Math.max(0, Math.min(...ys) - pad);
-        const x2 = Math.min(W, Math.max(...xs) + pad);
-        const y2 = Math.min(H, Math.max(...ys) + pad);
-        ctx.strokeStyle = "#38bdf8";
-        ctx.lineWidth   = 2;
-        ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+        lm.forEach(l => {
+          allXs.push((1 - l.x) * W);  // mirrored
+          allYs.push(l.y * H);
+        });
       });
+      const pad = 24;
+      const x1 = Math.max(0, Math.min(...allXs) - pad);
+      const y1 = Math.max(0, Math.min(...allYs) - pad);
+      const x2 = Math.min(W, Math.max(...allXs) + pad);
+      const y2 = Math.min(H, Math.max(...allYs) + pad);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth   = 2;
+      ctx.strokeRect(x1, y1, x2-x1, y2-y1);
     }
     requestAnimationFrame(draw);
   }
@@ -305,7 +308,7 @@ function onHandResults(results){
   const hasHand = lastLandmarks !== null;
   document.getElementById("hand-dot").className = "hand-dot" + (hasHand ? " on" : "");
   document.getElementById("hand-status").textContent = hasHand
-    ? (lastLandmarks.length === 2 ? "Both hands" : "Hand detected")
+    ? (lastLandmarks.length === 2 ? "Sign detected (2 hands)" : "Hand detected")
     : "No hand";
   document.getElementById("cam-hint").textContent = hasHand
     ? "Hold gesture steady" : "Show your hand to the camera";
@@ -383,15 +386,8 @@ function stopPredictionLoop(){
 
 async function sendToServer(lmList){
   sendPending = true;
-  // Use only the largest hand (most prominent) — avoids confusion from second hand
-  const sorted = [...lmList].sort((a, b) => {
-    const area = lm => {
-      const xs = lm.map(l => l.x), ys = lm.map(l => l.y);
-      return (Math.max(...xs)-Math.min(...xs)) * (Math.max(...ys)-Math.min(...ys));
-    };
-    return area(b) - area(a);
-  });
-  const hands = [sorted[0].map(l => ({x:l.x, y:l.y, z:l.z}))];
+  // Send ALL hands — server combines them for two-hand signs
+  const hands = lmList.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
   try{
     const r = await fetch("/predict", {
       method:"POST",

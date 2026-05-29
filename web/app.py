@@ -223,30 +223,36 @@ def predict():
 
     state.no_hand_count = 0
 
-    # Use only the largest hand (most prominent) for prediction
-    # Sort by bounding box area — largest = closest/most prominent
-    def hand_area(hand_lms):
-        xs = [l["x"] for l in hand_lms]
-        ys = [l["y"] for l in hand_lms]
-        return (max(xs)-min(xs)) * (max(ys)-min(ys))
-
-    raw_hands = sorted(raw_hands, key=hand_area, reverse=True)
-
-    # Convert JSON dicts to LM objects — use only primary (largest) hand
+    # Convert all hands to LM objects
     try:
-        lm_raw = [LM(l) for l in raw_hands[0]]
-        if len(lm_raw) != 21:
-            raise ValueError(f"Expected 21 landmarks, got {len(lm_raw)}")
-    except Exception as e:
+        all_hands_lm = []
+        for hand in raw_hands[:2]:  # max 2 hands
+            lms = [LM(l) for l in hand]
+            if len(lms) == 21:
+                all_hands_lm.append(lms)
+        if not all_hands_lm:
+            raise ValueError("No valid hands")
+    except Exception:
         return jsonify(hand=False, letter="—", conf=0, stable=False,
                        status="Bad landmarks", top3=[])
 
-    # Reject false detections — real hand bbox is 5%-85% of frame
-    xs = [l.x for l in lm_raw]; ys = [l.y for l in lm_raw]
+    # Validate primary hand bounding box
+    primary = all_hands_lm[0]
+    xs = [l.x for l in primary]; ys = [l.y for l in primary]
     bw = max(xs) - min(xs); bh = max(ys) - min(ys)
     if bw < 0.04 or bh < 0.04 or bw > 0.92 or bh > 0.92:
         return jsonify(hand=False, letter="—", conf=0, stable=False,
                        status="No Hand Detected", top3=[])
+
+    # Use primary hand for prediction (model trained on single-hand features)
+    # Two-hand signs: use the hand with larger bounding box (dominant hand)
+    if len(all_hands_lm) == 2:
+        def bbox_area(lms):
+            xs = [l.x for l in lms]; ys = [l.y for l in lms]
+            return (max(xs)-min(xs)) * (max(ys)-min(ys))
+        lm_raw = max(all_hands_lm, key=bbox_area)
+    else:
+        lm_raw = primary
 
     label, conf, t3 = predict_landmarks(lm_raw)
 
