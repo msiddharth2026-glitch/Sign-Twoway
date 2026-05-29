@@ -41,8 +41,8 @@ main{flex:1;padding:20px 24px;display:flex;flex-direction:column;gap:16px;overfl
 .top3-letter{font-size:22px;font-weight:800;color:#38bdf8}
 .top3-conf{font-size:10px;color:#64748b}
 .cam-wrap{position:relative;border-radius:8px;overflow:hidden;background:#111;aspect-ratio:4/3}
-#video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-#overlay-canvas{width:100%;height:100%;display:block;border-radius:8px}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#overlay-canvas{position:absolute;inset:0;width:100%;height:100%}
 .cam-border{position:absolute;inset:0;border:2px solid #38bdf8;border-radius:8px;pointer-events:none}
 .cam-corner{position:absolute;width:18px;height:18px;border-color:#38bdf8;border-style:solid}
 .cam-corner.tl{top:6px;left:6px;border-width:2px 0 0 2px}
@@ -101,7 +101,6 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
   <div class="tab" onclick="switchMode(2)">🎙 Mode 2 — Text/Speech to Sign</div>
 </div>
 <main>
-<!-- MODE 1 -->
 <div id="panel-1" class="panel active">
   <div class="row row-2">
     <div class="card pred-card">
@@ -148,7 +147,6 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
   </div>
   <audio id="audio-player"></audio>
 </div>
-<!-- MODE 2 -->
 <div id="panel-2" class="panel">
   <div class="card">
     <div class="card-label">Input</div>
@@ -189,27 +187,13 @@ select{background:#1e293b;color:#f8fafc;border:1px solid #334155;border-radius:6
 <div class="status-bar">Status: <span id="status-text">Loading...</span></div>
 
 <script>
-// ═══════════════════════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════════════════════
-let capturing    = false;
-let stream       = null;
-let mpHands      = null;
-let mpReady      = false;
-let pollTimer    = null;
-let sendPending  = false;
-let lastLandmarks = null;
-let sentence     = [];
+let capturing = false, stream = null, mpHands = null, mpReady = false;
+let pollTimer = null, sendPending = false, lastLandmarks = null, sentence = [];
 
-// ═══════════════════════════════════════════════════════════
-// CAMERA
-// ═══════════════════════════════════════════════════════════
 async function startCamera(){
   if(stream) return;
   try{
-    stream = await navigator.mediaDevices.getUserMedia({
-      video:{width:640, height:480, facingMode:"user"}
-    });
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}});
     const video = document.getElementById("video");
     video.srcObject = stream;
     await new Promise(r => { video.onloadedmetadata = r; });
@@ -217,385 +201,240 @@ async function startCamera(){
     startCanvasLoop();
     setStatus("Camera ready — loading hand detector...");
     loadMediaPipe();
-  } catch(e){
-    setStatus("Camera error: " + e.message, "err");
-  }
+  } catch(e){ setStatus("Camera error: "+e.message,"err"); }
 }
 
-// Draw camera feed to canvas continuously
 function startCanvasLoop(){
   const video  = document.getElementById("video");
   const canvas = document.getElementById("overlay-canvas");
   const ctx    = canvas.getContext("2d");
-
   function draw(){
     if(!stream) return;
-    const W = video.videoWidth  || 640;
-    const H = video.videoHeight || 480;
-    canvas.width  = W;
-    canvas.height = H;
-
-    // Normal mirrored feed
-    ctx.save();
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, -W, 0, W, H);
-    ctx.restore();
-
-    // Draw combined hand bounding box
+    const W = video.videoWidth||640, H = video.videoHeight||480;
+    canvas.width = W; canvas.height = H;
+    // Draw hand bounding box only (video shows through CSS)
     if(lastLandmarks && capturing){
-      let allXs = [], allYs = [];
+      let allXs=[], allYs=[];
       lastLandmarks.forEach(lm => {
-        lm.forEach(l => {
-          allXs.push((1 - l.x) * W);
-          allYs.push(l.y * H);
-        });
+        lm.forEach(l => { allXs.push((1-l.x)*W); allYs.push(l.y*H); });
       });
-      const pad = 24;
-      const x1 = Math.max(0, Math.min(...allXs) - pad);
-      const y1 = Math.max(0, Math.min(...allYs) - pad);
-      const x2 = Math.min(W, Math.max(...allXs) + pad);
-      const y2 = Math.min(H, Math.max(...allYs) + pad);
-      ctx.strokeStyle = "#38bdf8";
-      ctx.lineWidth   = 2;
-      ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+      const pad=24;
+      const x1=Math.max(0,Math.min(...allXs)-pad), y1=Math.max(0,Math.min(...allYs)-pad);
+      const x2=Math.min(W,Math.max(...allXs)+pad), y2=Math.min(H,Math.max(...allYs)+pad);
+      ctx.strokeStyle="#38bdf8"; ctx.lineWidth=2;
+      ctx.strokeRect(x1,y1,x2-x1,y2-y1);
     }
     requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);
 }
 
-// ═══════════════════════════════════════════════════════════
-// MEDIAPIPE
-// ═══════════════════════════════════════════════════════════
 function loadMediaPipe(){
-  if(typeof Hands === "undefined"){
-    setStatus("Loading hand detector...", "warn");
-    setTimeout(loadMediaPipe, 1000);
-    return;
-  }
+  if(typeof Hands==="undefined"){ setTimeout(loadMediaPipe,1000); return; }
   try{
-    mpHands = new Hands({
-      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`
-    });
-    mpHands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,          // 1 = more accurate (was 0)
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.6
-    });
+    mpHands = new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
+    mpHands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.6});
     mpHands.onResults(onHandResults);
     mpReady = true;
     setStatus("Ready — click Start Capture");
-  } catch(e){
-    setStatus("Hand detector error: " + e.message, "err");
-  }
+  } catch(e){ setStatus("Hand detector error: "+e.message,"err"); }
 }
 
 function onHandResults(results){
   if(!capturing) return;
-
-  if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
-    // Filter valid hands by bounding box size
-    const valid = results.multiHandLandmarks.filter(lm => {
-      const xs = lm.map(l => l.x), ys = lm.map(l => l.y);
-      const bw = Math.max(...xs) - Math.min(...xs);
-      const bh = Math.max(...ys) - Math.min(...ys);
-      return bw > 0.04 && bh > 0.04 && bw < 0.92 && bh < 0.92;
+  if(results.multiHandLandmarks && results.multiHandLandmarks.length>0){
+    const valid = results.multiHandLandmarks.filter(lm=>{
+      const xs=lm.map(l=>l.x), ys=lm.map(l=>l.y);
+      const bw=Math.max(...xs)-Math.min(...xs), bh=Math.max(...ys)-Math.min(...ys);
+      return bw>0.04&&bh>0.04&&bw<0.92&&bh<0.92;
     });
-    lastLandmarks = valid.length > 0 ? valid : null;
-  } else {
-    lastLandmarks = null;
-  }
-
-  // Update hand indicator immediately
-  const hasHand = lastLandmarks !== null;
-  document.getElementById("hand-dot").className = "hand-dot" + (hasHand ? " on" : "");
-  document.getElementById("hand-status").textContent = hasHand
-    ? (lastLandmarks.length === 2 ? "Sign detected (2 hands)" : "Hand detected")
-    : "No hand";
-  document.getElementById("cam-hint").textContent = hasHand
-    ? "Hold gesture steady" : "Show your hand to the camera";
+    lastLandmarks = valid.length>0 ? valid : null;
+  } else { lastLandmarks=null; }
+  const hasHand = lastLandmarks!==null;
+  document.getElementById("hand-dot").className = "hand-dot"+(hasHand?" on":"");
+  document.getElementById("hand-status").textContent = hasHand?(lastLandmarks.length===2?"Sign (2 hands)":"Hand detected"):"No hand";
+  document.getElementById("cam-hint").textContent = hasHand?"Hold gesture steady":"Show your hand to the camera";
 }
 
-}
-
-// ═══════════════════════════════════════════════════════════
-// CAPTURE TOGGLE
-// ═══════════════════════════════════════════════════════════
 function toggleCapture(){
   capturing = !capturing;
-  const btn  = document.getElementById("capture-btn");
-  const hint = document.getElementById("capture-hint");
-
+  const btn=document.getElementById("capture-btn"), hint=document.getElementById("capture-hint");
   if(capturing){
-    btn.style.background = "#f87171";
-    btn.style.color      = "#fff";
-    btn.textContent      = "⏹ Stop Capture";
-    hint.textContent     = "Detecting signs — show your hand";
+    btn.style.background="#f87171"; btn.style.color="#fff";
+    btn.textContent="⏹ Stop Capture"; hint.textContent="Detecting signs — show your hand";
     startPredictionLoop();
   } else {
-    btn.style.background = "#22c55e";
-    btn.style.color      = "#0f172a";
-    btn.textContent      = "▶ Start Capture";
-    hint.textContent     = "Click Start to begin detecting signs";
-    stopPredictionLoop();
-    lastLandmarks = null;
-fetch("/reset_state", {method:"POST"}).catch(()=>{});
+    btn.style.background="#22c55e"; btn.style.color="#0f172a";
+    btn.textContent="▶ Start Capture"; hint.textContent="Click Start to begin detecting signs";
+    stopPredictionLoop(); lastLandmarks=null;
+    fetch("/reset_state",{method:"POST"}).catch(()=>{});
     resetPredUI();
   }
 }
 
 function resetPredUI(){
-  document.getElementById("pred-letter").textContent = "—";
-  document.getElementById("conf-label").textContent  = "Confidence: 0%";
-  document.getElementById("conf-fill").style.width   = "0%";
-  document.getElementById("pred-status").textContent = "Stopped";
-  document.getElementById("pred-status").className   = "status-pill";
-  document.getElementById("hand-dot").className      = "hand-dot";
-  document.getElementById("hand-status").textContent = "No hand";
-  document.getElementById("top3-row").style.display  = "none";
-  document.getElementById("cam-hint").textContent    = "Show your hand to the camera";
+  document.getElementById("pred-letter").textContent="—";
+  document.getElementById("conf-label").textContent="Confidence: 0%";
+  document.getElementById("conf-fill").style.width="0%";
+  document.getElementById("pred-status").textContent="Stopped";
+  document.getElementById("pred-status").className="status-pill";
+  document.getElementById("hand-dot").className="hand-dot";
+  document.getElementById("hand-status").textContent="No hand";
+  document.getElementById("top3-row").style.display="none";
+  document.getElementById("cam-hint").textContent="Show your hand to the camera";
 }
 
-// ═══════════════════════════════════════════════════════════
-// PREDICTION LOOP — MediaPipe + server decoupled
-// ═══════════════════════════════════════════════════════════
 function startPredictionLoop(){
-  // MediaPipe processes frames at ~15fps
   const video = document.getElementById("video");
-  const mpLoop = async () => {
+  const mpLoop = async()=>{
     if(!capturing) return;
-    if(mpReady && mpHands && video.readyState >= 2){
-      try{ await mpHands.send({image: video}); } catch(e){}
-    }
-    if(capturing) setTimeout(mpLoop, 66); // ~15fps
+    if(mpReady&&mpHands&&video.readyState>=2){ try{await mpHands.send({image:video});}catch(e){} }
+    if(capturing) setTimeout(mpLoop,66);
   };
   mpLoop();
-
-  // Server predictions at 8fps — non-blocking
   if(pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    if(!capturing || sendPending) return;
-    if(lastLandmarks){
-      await sendToServer(lastLandmarks);
-    } else {
-      handlePrediction({hand:false, letter:"—", conf:0, stable:false, status:"No Hand Detected", top3:[]});
-    }
-  }, 125);
+  pollTimer = setInterval(async()=>{
+    if(!capturing||sendPending) return;
+    if(lastLandmarks) await sendToServer(lastLandmarks);
+    else handlePrediction({hand:false,letter:"—",conf:0,stable:false,status:"No Hand Detected",top3:[]});
+  },125);
 }
 
 function stopPredictionLoop(){
-  if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
-  sendPending = false;
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+  sendPending=false;
 }
 
 async function sendToServer(lmList){
-  sendPending = true;
-  // Send ALL hands — server combines them for two-hand signs
-  const hands = lmList.map(lm => lm.map(l => ({x:l.x, y:l.y, z:l.z})));
+  sendPending=true;
+  const hands=lmList.map(lm=>lm.map(l=>({x:l.x,y:l.y,z:l.z})));
   try{
-    const r = await fetch("/predict", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({hands})
-    });
-    if(r.ok){
-      const d = await r.json();
-      handlePrediction(d);
-    }
-  } catch(e){
-  } finally{
-    sendPending = false;
-  }
+    const r=await fetch("/predict",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({hands})});
+    if(r.ok){ const d=await r.json(); handlePrediction(d); }
+  }catch(e){}finally{sendPending=false;}
 }
 
-// ═══════════════════════════════════════════════════════════
-// HANDLE PREDICTION RESPONSE
-// ═══════════════════════════════════════════════════════════
 function handlePrediction(d){
-  const letterEl = document.getElementById("pred-letter");
-  letterEl.textContent = d.letter || "—";
-
-  const conf = d.conf || 0;
-  document.getElementById("conf-label").textContent = `Confidence: ${conf}%`;
-  const fill = document.getElementById("conf-fill");
-  fill.style.width      = conf + "%";
-  fill.style.background = conf>=75?"#22c55e":conf>=50?"#f59e0b":"#f87171";
-
-  const pill = document.getElementById("pred-status");
-  if(d.stable){
-    pill.className   = "status-pill ready";
-    pill.textContent = "Stable ✓";
-  } else if(d.hand){
-    pill.className   = "status-pill detecting";
-    pill.textContent = "Detecting...";
-  } else {
-    pill.className   = "status-pill";
-    pill.textContent = "Waiting";
-  }
-
-  // Top-3
-  const t3 = document.getElementById("top3-row");
-  if(d.top3 && d.top3.length && d.hand){
-    t3.style.display = "flex";
-    t3.innerHTML = d.top3.map((item,i) =>
-      `<div class="top3-item${i===0?" first":""}">
-        <div class="top3-letter">${item[0]}</div>
-        <div class="top3-conf">${item[1]}%</div>
-      </div>`
-    ).join("");
-  } else {
-    t3.style.display = "none";
-  }
-
+  const letterEl=document.getElementById("pred-letter");
+  letterEl.textContent=d.letter||"—";
+  const conf=d.conf||0;
+  document.getElementById("conf-label").textContent=`Confidence: ${conf}%`;
+  const fill=document.getElementById("conf-fill");
+  fill.style.width=conf+"%"; fill.style.background=conf>=75?"#22c55e":conf>=50?"#f59e0b":"#f87171";
+  const pill=document.getElementById("pred-status");
+  if(d.stable){pill.className="status-pill ready";pill.textContent="Stable ✓";}
+  else if(d.hand){pill.className="status-pill detecting";pill.textContent="Detecting...";}
+  else{pill.className="status-pill";pill.textContent="Waiting";}
+  const t3=document.getElementById("top3-row");
+  if(d.top3&&d.top3.length&&d.hand){
+    t3.style.display="flex";
+    t3.innerHTML=d.top3.map((item,i)=>`<div class="top3-item${i===0?" first":"'}"><div class="top3-letter">${item[0]}</div><div class="top3-conf">${item[1]}%</div></div>`).join("");
+  } else { t3.style.display="none"; }
   if(d.new_letter){
-    letterEl.classList.remove("new");
-    void letterEl.offsetWidth;
-    letterEl.classList.add("new");
-    appendLetter(d.new_letter);
-    setStatus("Added: " + d.new_letter);
+    letterEl.classList.remove("new"); void letterEl.offsetWidth; letterEl.classList.add("new");
+    appendLetter(d.new_letter); setStatus("Added: "+d.new_letter);
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// SENTENCE BUILDER
-// ═══════════════════════════════════════════════════════════
-function appendLetter(l){ sentence.push(l); renderSentence(); }
-function addSpace(){ sentence.push(" "); renderSentence(); setStatus("Space added"); }
-function deleteLast(){ if(sentence.length){ sentence.pop(); renderSentence(); } }
-function clearSentence(){
-  sentence = [];
-  renderSentence();
-  setStatus("Cleared");
-  fetch("/reset_state", {method:"POST"}).catch(()=>{});
-}
-function renderSentence(){
-  document.getElementById("sentence-box").textContent = sentence.join("");
-}
+function appendLetter(l){sentence.push(l);renderSentence();}
+function addSpace(){sentence.push(" ");renderSentence();setStatus("Space added");}
+function deleteLast(){if(sentence.length){sentence.pop();renderSentence();}}
+function clearSentence(){sentence=[];renderSentence();setStatus("Cleared");fetch("/reset_state",{method:"POST"}).catch(()=>{});}
+function renderSentence(){document.getElementById("sentence-box").textContent=sentence.join("");}
 
 async function speakSentence(){
-  const raw = sentence.join("").trim();
-  if(!raw){ setStatus("Nothing to speak","warn"); return; }
-  // sentence is letters + spaces — already forms words like "HELLO WORLD"
-  // gTTS reads this as natural words, not letters
-  const text = raw;
+  const text=sentence.join("").trim();
+  if(!text){setStatus("Nothing to speak","warn");return;}
   setStatus("Generating speech...");
   try{
-    const r = await fetch("/speak",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
-    const d = await r.json();
-    if(!d.ok){ setStatus("Speech error: "+(d.msg||""),"err"); return; }
-    const audio = document.getElementById("audio-player");
-    audio.src = d.url + "?t=" + Date.now();
-    audio.play();
+    const r=await fetch("/speak",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
+    const d=await r.json();
+    if(!d.ok){setStatus("Speech error: "+(d.msg||""),"err");return;}
+    const audio=document.getElementById("audio-player");
+    audio.src=d.url+"?t="+Date.now(); audio.play();
     setStatus(`Speaking: "${text}"`);
-  } catch(e){ setStatus("Speech error","err"); }
+  }catch(e){setStatus("Speech error","err");}
 }
 
-// ═══════════════════════════════════════════════════════════
-// MODE SWITCHING
-// ═══════════════════════════════════════════════════════════
 function switchMode(n){
-  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
-  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
   document.getElementById("panel-"+n).classList.add("active");
   document.querySelectorAll(".tab")[n-1].classList.add("active");
   if(n===1) startCamera();
-  else { stopPredictionLoop(); capturing = false; }
+  else{stopPredictionLoop();capturing=false;}
 }
 
-// ═══════════════════════════════════════════════════════════
-// MODE 2 — SLIDESHOW
-// ═══════════════════════════════════════════════════════════
-let slideData=[], slideIdx=0, slideTimer=null, slideSpeed=1000, slidePlaying=true;
+let slideData=[],slideIdx=0,slideTimer=null,slideSpeed=1000,slidePlaying=true;
 
 async function textToSign(){
-  const text = document.getElementById("m2-text").value.trim();
-  if(!text){ setStatus("Enter text first","warn"); return; }
+  const text=document.getElementById("m2-text").value.trim();
+  if(!text){setStatus("Enter text first","warn");return;}
   setStatus("Loading signs...");
   try{
-    const r = await fetch("/signs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
-    const d = await r.json();
-    if(!d.ok){ setStatus("Error: "+(d.msg||""),"err"); return; }
-    renderSigns(d.signs);
-    setStatus(`${d.signs.length} signs for "${text}"`);
-  } catch(e){ setStatus("Error loading signs","err"); }
+    const r=await fetch("/signs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
+    const d=await r.json();
+    if(!d.ok){setStatus("Error: "+(d.msg||""),"err");return;}
+    renderSigns(d.signs); setStatus(`${d.signs.length} signs for "${text}"`);
+  }catch(e){setStatus("Error loading signs","err");}
 }
 
 function renderSigns(signs){
-  slideData = signs;
-  if(!signs.length){ document.getElementById("signs-grid").innerHTML="<p style='color:#475569'>No signs found.</p>"; return; }
-  document.getElementById("slideshow").style.display = "flex";
-  document.getElementById("slide-dots").innerHTML = signs.map((_,i) =>
-    `<div id="dot-${i}" style="width:7px;height:7px;border-radius:50%;background:#334155;transition:.2s"></div>`
-  ).join("");
-  document.getElementById("signs-grid").innerHTML = signs.map((s,i) => {
-    const img = s.img
-      ? `<img class="sign-img" src="${s.img}" onclick="jumpTo(${i})">`
-      : `<div class="sign-space">SPC</div>`;
+  slideData=signs;
+  if(!signs.length){document.getElementById("signs-grid").innerHTML="<p style='color:#475569'>No signs found.</p>";return;}
+  document.getElementById("slideshow").style.display="flex";
+  document.getElementById("slide-dots").innerHTML=signs.map((_,i)=>`<div id="dot-${i}" style="width:7px;height:7px;border-radius:50%;background:#334155;transition:.2s"></div>`).join("");
+  document.getElementById("signs-grid").innerHTML=signs.map((s,i)=>{
+    const img=s.img?`<img class="sign-img" src="${s.img}" onclick="jumpTo(${i})">`:`<div class="sign-space">SPC</div>`;
     return `<div class="sign-cell" id="cell-${i}">${img}<div class="sign-char">${s.char}</div></div>`;
   }).join("");
-  slideIdx = 0; slidePlaying = true;
-  showSlide(0); startSlideTimer();
+  slideIdx=0;slidePlaying=true;showSlide(0);startSlideTimer();
 }
 
 function showSlide(i){
-  const s = slideData[i]; if(!s) return;
-  const img = document.getElementById("slide-img");
-  const sp  = document.getElementById("slide-space");
-  if(s.char==="SPC"||!s.img){ img.style.display="none"; sp.style.display="flex"; }
-  else { img.src=s.img; img.style.display="block"; sp.style.display="none"; }
-  document.getElementById("slide-char").textContent  = s.char;
-  document.getElementById("slide-index").textContent = `${i+1} / ${slideData.length}`;
-  document.getElementById("slide-bar").style.width   = `${((i+1)/slideData.length)*100}%`;
-  slideData.forEach((_,j) => {
-    const dot  = document.getElementById("dot-"+j);
-    const cell = document.getElementById("cell-"+j);
-    if(dot)  dot.style.background  = j===i?"#38bdf8":j<i?"#1e4a6e":"#334155";
-    if(cell) cell.style.outline    = j===i?"2px solid #38bdf8":"none";
+  const s=slideData[i];if(!s)return;
+  const img=document.getElementById("slide-img"),sp=document.getElementById("slide-space");
+  if(s.char==="SPC"||!s.img){img.style.display="none";sp.style.display="flex";}
+  else{img.src=s.img;img.style.display="block";sp.style.display="none";}
+  document.getElementById("slide-char").textContent=s.char;
+  document.getElementById("slide-index").textContent=`${i+1} / ${slideData.length}`;
+  document.getElementById("slide-bar").style.width=`${((i+1)/slideData.length)*100}%`;
+  slideData.forEach((_,j)=>{
+    const dot=document.getElementById("dot-"+j),cell=document.getElementById("cell-"+j);
+    if(dot) dot.style.background=j===i?"#38bdf8":j<i?"#1e4a6e":"#334155";
+    if(cell) cell.style.outline=j===i?"2px solid #38bdf8":"none";
   });
-  slideIdx = i;
+  slideIdx=i;
 }
-function startSlideTimer(){ clearInterval(slideTimer); slideTimer=setInterval(()=>showSlide((slideIdx+1)%slideData.length),slideSpeed); }
-function togglePlay(){ slidePlaying=!slidePlaying; document.getElementById("play-btn").textContent=slidePlaying?"⏸":"▶"; if(slidePlaying)startSlideTimer(); else clearInterval(slideTimer); }
-function slideNext(){ showSlide((slideIdx+1)%slideData.length); if(slidePlaying)startSlideTimer(); }
-function slidePrev(){ showSlide((slideIdx-1+slideData.length)%slideData.length); if(slidePlaying)startSlideTimer(); }
-function jumpTo(i){ showSlide(i); if(slidePlaying)startSlideTimer(); }
-function setSpeed(){ slideSpeed=parseInt(document.getElementById("speed-sel").value); if(slidePlaying)startSlideTimer(); }
+function startSlideTimer(){clearInterval(slideTimer);slideTimer=setInterval(()=>showSlide((slideIdx+1)%slideData.length),slideSpeed);}
+function togglePlay(){slidePlaying=!slidePlaying;document.getElementById("play-btn").textContent=slidePlaying?"⏸":"▶";if(slidePlaying)startSlideTimer();else clearInterval(slideTimer);}
+function slideNext(){showSlide((slideIdx+1)%slideData.length);if(slidePlaying)startSlideTimer();}
+function slidePrev(){showSlide((slideIdx-1+slideData.length)%slideData.length);if(slidePlaying)startSlideTimer();}
+function jumpTo(i){showSlide(i);if(slidePlaying)startSlideTimer();}
+function setSpeed(){slideSpeed=parseInt(document.getElementById("speed-sel").value);if(slidePlaying)startSlideTimer();}
 
-// ═══════════════════════════════════════════════════════════
-// SPEECH RECOGNITION (Mode 2)
-// ═══════════════════════════════════════════════════════════
-let recognition = null;
+let recognition=null;
 function toggleSpeech(){
-  const btn = document.getElementById("mic-btn");
-  if(recognition){ recognition.stop(); recognition=null; btn.classList.remove("listening"); return; }
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if(!SR){ setStatus("Speech not supported","err"); return; }
-  recognition = new SR();
-  recognition.lang = "en-US";
-  recognition.interimResults = false;
-  recognition.onstart  = () => { btn.classList.add("listening"); setStatus("Listening..."); };
-  recognition.onresult = e  => { document.getElementById("m2-text").value=e.results[0][0].transcript; textToSign(); };
-  recognition.onerror  = e  => { setStatus("Speech error: "+e.error,"err"); };
-  recognition.onend    = () => { btn.classList.remove("listening"); recognition=null; };
+  const btn=document.getElementById("mic-btn");
+  if(recognition){recognition.stop();recognition=null;btn.classList.remove("listening");return;}
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){setStatus("Speech not supported","err");return;}
+  recognition=new SR();recognition.lang="en-US";recognition.interimResults=false;
+  recognition.onstart=()=>{btn.classList.add("listening");setStatus("Listening...");};
+  recognition.onresult=e=>{document.getElementById("m2-text").value=e.results[0][0].transcript;textToSign();};
+  recognition.onerror=e=>{setStatus("Speech error: "+e.error,"err");};
+  recognition.onend=()=>{btn.classList.remove("listening");recognition=null;};
   recognition.start();
 }
 
-// ═══════════════════════════════════════════════════════════
-// STATUS
-// ═══════════════════════════════════════════════════════════
-function setStatus(msg, type="ok"){
-  const el = document.getElementById("status-text");
-  el.textContent = msg;
-  el.style.color = type==="err"?"#f87171":type==="warn"?"#f59e0b":"#4ade80";
+function setStatus(msg,type="ok"){
+  const el=document.getElementById("status-text");
+  el.textContent=msg;
+  el.style.color=type==="err"?"#f87171":type==="warn"?"#f59e0b":"#4ade80";
 }
 
-// ═══════════════════════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════════════════════
 startCamera();
-document.getElementById("m2-text").addEventListener("keydown", e => { if(e.key==="Enter") textToSign(); });
+document.getElementById("m2-text").addEventListener("keydown",e=>{if(e.key==="Enter")textToSign();});
 </script>
 </body>
 </html>
-
